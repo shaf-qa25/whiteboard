@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, use, Suspense } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { fetchDrawingRoomById, DrawingRoom } from "@/services/drawing-room.service";
+import { fetchDrawingRoomById, verifyRoomPasswordOnServer, DrawingRoom } from "@/services/drawing-room.service";
 import { fetchUserById, getUserSession, AppUserSession } from "@/services/user.service";
 import Navbar from "@/components/Navbar";
 import BoardContainer from "@/components/drawing-room/BoardContainer";
@@ -45,6 +45,8 @@ function DrawingRoomContent(props: PageProps) {
   const [isLocked, setIsLocked] = useState(false);
   const [enteredPassword, setEnteredPassword] = useState("");
   const [passwordError, setPasswordError] = useState(false);
+  const [passwordErrorMessage, setPasswordErrorMessage] = useState("");
+  const [isVerifying, setIsVerifying] = useState(false);
 
   useEffect(() => {
     let isCancelled = false;
@@ -71,19 +73,18 @@ function DrawingRoomContent(props: PageProps) {
         const currentRoom = roomData[0];
         const isOwner = currentRoom.owner === userSession.user.id;
 
-        // Check if private and locked
-        if (!currentRoom.isPublic && !isOwner) {
-          if (currentRoom.isPasswordProtected) {
-            setIsLocked(true);
-          } else {
-            alert("This is a private whiteboard room accessible only to the host.");
-            router.push("/");
-            return;
-          }
+        // Check if room is password-protected or private
+        if (currentRoom.isPasswordProtected && !isOwner) {
+          setIsLocked(true);
+          // Withhold drawing from state until password is authenticated
+          setRoom({ ...currentRoom, drawing: null });
+        } else if (!currentRoom.isPublic && !isOwner) {
+          alert("This is a private whiteboard room accessible only to the host.");
+          router.push("/");
+          return;
+        } else {
+          setRoom(currentRoom);
         }
-
-        if (isCancelled) return;
-        setRoom(currentRoom);
 
         // Fetch owner details
         if (currentRoom.owner) {
@@ -108,13 +109,35 @@ function DrawingRoomContent(props: PageProps) {
     };
   }, [roomId, router]);
 
-  const handleUnlockRoom = (e: React.FormEvent) => {
+  const handleUnlockRoom = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (room?.password && enteredPassword === room.password) {
-      setIsLocked(false);
-      setPasswordError(false);
-    } else {
+    if (!enteredPassword.trim()) return;
+
+    setIsVerifying(true);
+    setPasswordError(false);
+    setPasswordErrorMessage("");
+
+    try {
+      const res = await verifyRoomPasswordOnServer(
+        roomId,
+        enteredPassword.trim(),
+        session?.user?.id || "guest_user"
+      );
+
+      if (res.success) {
+        if (res.drawing && room) {
+          setRoom({ ...room, drawing: res.drawing });
+        }
+        setIsLocked(false);
+      } else {
+        setPasswordError(true);
+        setPasswordErrorMessage(res.message || "Incorrect password. Please try again.");
+      }
+    } catch {
       setPasswordError(true);
+      setPasswordErrorMessage("Failed to verify password. Please try again.");
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -122,7 +145,7 @@ function DrawingRoomContent(props: PageProps) {
     return <RoomLoadingFallback />;
   }
 
-  // Password Unlock Gate
+  // Server-Verified Password Unlock Gate
   if (isLocked) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-900 p-4">
@@ -139,7 +162,7 @@ function DrawingRoomContent(props: PageProps) {
           {passwordError && (
             <div className="mt-4 flex items-center gap-2 rounded-xl bg-rose-500/10 p-3 text-xs text-rose-400 border border-rose-500/20">
               <AlertCircle className="h-4 w-4 shrink-0" />
-              <span>Incorrect password. Please try again.</span>
+              <span>{passwordErrorMessage || "Incorrect password. Please try again."}</span>
             </div>
           )}
 
@@ -152,7 +175,8 @@ function DrawingRoomContent(props: PageProps) {
                 value={enteredPassword}
                 onChange={(e) => setEnteredPassword(e.target.value)}
                 autoFocus
-                className="w-full rounded-xl border border-slate-800 bg-slate-900 pl-10 pr-3.5 py-2.5 text-xs text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20"
+                disabled={isVerifying}
+                className="w-full rounded-xl border border-slate-800 bg-slate-900 pl-10 pr-3.5 py-2.5 text-xs text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 disabled:opacity-50"
               />
             </div>
 
@@ -167,9 +191,17 @@ function DrawingRoomContent(props: PageProps) {
 
               <button
                 type="submit"
-                className="flex flex-1 items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-500 transition-all cursor-pointer"
+                disabled={isVerifying}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-500 transition-all cursor-pointer disabled:opacity-50"
               >
-                Unlock & Join
+                {isVerifying ? (
+                  <>
+                    <Spinner className="h-3.5 w-3.5 text-white" />
+                    <span>Verifying...</span>
+                  </>
+                ) : (
+                  <span>Unlock & Join</span>
+                )}
               </button>
             </div>
           </form>

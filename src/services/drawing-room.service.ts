@@ -8,10 +8,10 @@ export interface DrawingRoom {
   owner: string;
   isPublic: boolean;
   isPasswordProtected?: boolean;
-  password?: string | null;
   drawing?: string | null;
   created_at: string;
   updated_at?: string;
+  // NOTE: Password fields are never exposed to the client
 }
 
 const LOCAL_ROOMS_KEY = "collabboard_local_rooms";
@@ -20,7 +20,6 @@ const getLocalRooms = (): DrawingRoom[] => {
   if (typeof window === "undefined") return [];
   const stored = localStorage.getItem(LOCAL_ROOMS_KEY);
   if (!stored) {
-    // Initial sample room
     const sample: DrawingRoom = {
       id: "demo-room-101",
       name: "Team Brainstorming & Architecture",
@@ -46,49 +45,49 @@ const saveLocalRooms = (rooms: DrawingRoom[]) => {
   }
 };
 
+/**
+ * Creates a drawing room via the secure server-side API (with bcrypt password hashing).
+ */
 export const createDrawingRoom = async (
   name: string,
   userId: string,
   isPublic: boolean = true,
   password?: string
 ): Promise<DrawingRoom[] | null> => {
-  const newRoomId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `room_${Date.now()}`;
-  const now = new Date().toISOString();
-
-  if (isSupabaseConfigured) {
+  if (typeof window !== "undefined") {
     try {
-      const { data, error } = await supabase
-        .from(DRAWING_ROOM_TABLE)
-        .insert({
-          id: newRoomId,
-          name,
-          owner: userId,
-          isPublic,
-          isPasswordProtected: Boolean(password),
-          password: password || null,
-          drawing: null,
-          created_at: now,
-          updated_at: now,
-        })
-        .select();
+      const res = await fetch("/api/room/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, userId, isPublic, password }),
+      });
 
-      if (!error && data) {
-        return data as DrawingRoom[];
+      if (res.ok) {
+        const data = await res.json();
+        if (data.room) {
+          const rooms = getLocalRooms();
+          rooms.unshift(data.room);
+          saveLocalRooms(rooms);
+          return [data.room];
+        }
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to create room");
       }
-      console.warn("Supabase insert error, falling back to local:", error);
     } catch (err) {
-      console.warn("Supabase createDrawingRoom exception:", err);
+      console.warn("Server API room creation error, falling back to local:", err);
     }
   }
 
   // Local fallback
+  const newRoomId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `room_${Date.now()}`;
+  const now = new Date().toISOString();
   const localRoom: DrawingRoom = {
     id: newRoomId,
     name,
     owner: userId,
     isPublic,
     isPasswordProtected: Boolean(password),
-    password: password || null,
     created_at: now,
     drawing: null,
   };
@@ -99,12 +98,15 @@ export const createDrawingRoom = async (
   return [localRoom];
 };
 
+/**
+ * Fetches user drawing rooms with sanitized fields (omits password)
+ */
 export const fetchUserDrawingRooms = async (userId: string): Promise<DrawingRoom[]> => {
   if (isSupabaseConfigured) {
     try {
       const { data, error } = await supabase
         .from(DRAWING_ROOM_TABLE)
-        .select("*")
+        .select("id, name, owner, isPublic, isPasswordProtected, created_at, updated_at")
         .eq("owner", userId)
         .order("created_at", { ascending: false });
 
@@ -116,17 +118,19 @@ export const fetchUserDrawingRooms = async (userId: string): Promise<DrawingRoom
     }
   }
 
-  // Local fallback
   const rooms = getLocalRooms();
   return rooms.filter((r) => r.owner === userId || r.owner === "system");
 };
 
+/**
+ * Fetches public drawing rooms with sanitized fields (omits password)
+ */
 export const fetchPublicDrawingRooms = async (): Promise<DrawingRoom[]> => {
   if (isSupabaseConfigured) {
     try {
       const { data, error } = await supabase
         .from(DRAWING_ROOM_TABLE)
-        .select("*")
+        .select("id, name, owner, isPublic, isPasswordProtected, created_at, updated_at")
         .eq("isPublic", true)
         .order("created_at", { ascending: false });
 
@@ -138,17 +142,19 @@ export const fetchPublicDrawingRooms = async (): Promise<DrawingRoom[]> => {
     }
   }
 
-  // Local fallback
   const rooms = getLocalRooms();
   return rooms.filter((r) => r.isPublic);
 };
 
+/**
+ * Fetches a single drawing room by ID with sanitized fields (password column is NEVER selected)
+ */
 export const fetchDrawingRoomById = async (id: string): Promise<DrawingRoom[] | null> => {
   if (isSupabaseConfigured) {
     try {
       const { data, error } = await supabase
         .from(DRAWING_ROOM_TABLE)
-        .select("*")
+        .select("id, name, owner, isPublic, isPasswordProtected, created_at, updated_at, drawing")
         .eq("id", id);
 
       if (!error && data && data.length > 0) {
@@ -159,26 +165,38 @@ export const fetchDrawingRoomById = async (id: string): Promise<DrawingRoom[] | 
     }
   }
 
-  // Local fallback
   const rooms = getLocalRooms();
   const found = rooms.find((r) => r.id === id);
   if (found) {
     return [found];
   }
 
-  // If opening a new room link directly that hasn't been saved yet
-  const autoCreatedRoom: DrawingRoom = {
-    id,
-    name: "Collaborative Board",
-    owner: "unknown",
-    isPublic: true,
-    isPasswordProtected: false,
-    created_at: new Date().toISOString(),
-    drawing: null,
-  };
-  rooms.push(autoCreatedRoom);
-  saveLocalRooms(rooms);
-  return [autoCreatedRoom];
+  return null;
+};
+
+/**
+ * Verifies room password safely via the rate-limited server API.
+ */
+export const verifyRoomPasswordOnServer = async (
+  roomId: string,
+  password: string,
+  userId: string = "guest_user"
+): Promise<{ success: boolean; message?: string; accessTicket?: string; drawing?: string | null }> => {
+  try {
+    const res = await fetch("/api/room/verify-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomId, password, userId }),
+    });
+
+    const data = await res.json();
+    if (res.ok && data.success) {
+      return data;
+    }
+    return { success: false, message: data.message || "Failed to verify room password" };
+  } catch (err) {
+    return { success: false, message: "Network error while verifying password" };
+  }
 };
 
 export const updateRoomDrawing = async (roomId: string, drawing: string): Promise<void> => {
@@ -197,7 +215,6 @@ export const updateRoomDrawing = async (roomId: string, drawing: string): Promis
     }
   }
 
-  // Local fallback
   const rooms = getLocalRooms();
   const room = rooms.find((r) => r.id === roomId);
   if (room) {
@@ -222,7 +239,6 @@ export const deleteDrawingRoom = async (roomId: string, userId: string): Promise
     }
   }
 
-  // Local fallback
   let rooms = getLocalRooms();
   rooms = rooms.filter((r) => r.id !== roomId);
   saveLocalRooms(rooms);
