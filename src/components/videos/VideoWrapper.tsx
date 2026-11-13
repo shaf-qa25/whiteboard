@@ -62,7 +62,7 @@ export default function VideoWrapper({
       }
 
       try {
-        const { token, isConfigured } = await generateUserVideoToken(userData.id);
+        const { token, isConfigured } = await generateUserVideoToken(userData.id, callId);
 
         if (!isConfigured || !token) {
           if (!isCancelled) {
