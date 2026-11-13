@@ -1,4 +1,5 @@
 import { isSupabaseConfigured, supabase } from "../lib/initSupabase";
+import { getGuestToken } from "./user.service";
 
 export const DRAWING_ROOM_TABLE = "drawing-rooms";
 
@@ -61,10 +62,14 @@ export const createDrawingRoom = async (
 ): Promise<DrawingRoom[] | null> => {
   if (typeof window !== "undefined") {
     try {
+      const guestToken = getGuestToken();
       const res = await fetch("/api/room/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, userId, isPublic, password }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(guestToken ? { "x-guest-token": guestToken } : {}),
+        },
+        body: JSON.stringify({ name, userId, isPublic, password, guestToken }),
       });
 
       if (res.ok) {
@@ -162,11 +167,17 @@ export const fetchDrawingRoomById = async (
 ): Promise<FetchRoomResult> => {
   if (typeof window !== "undefined") {
     try {
+      const guestToken = getGuestToken();
       const q = new URLSearchParams();
       if (userId) q.set("userId", userId);
       if (ticket) q.set("ticket", ticket);
+      if (guestToken) q.set("guestToken", guestToken);
 
-      const res = await fetch(`/api/room/${id}?${q.toString()}`);
+      const res = await fetch(`/api/room/${id}?${q.toString()}`, {
+        headers: {
+          ...(guestToken ? { "x-guest-token": guestToken } : {}),
+        },
+      });
       if (res.status === 403) {
         return { room: null, isPrivateForbidden: true };
       }
@@ -241,10 +252,14 @@ export const updateRoomDrawing = async (
 ): Promise<boolean> => {
   if (typeof window !== "undefined") {
     try {
+      const guestToken = getGuestToken();
       const res = await fetch(`/api/room/${roomId}/drawing`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ drawing, userId, accessTicket }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(guestToken ? { "x-guest-token": guestToken } : {}),
+        },
+        body: JSON.stringify({ drawing, userId, accessTicket, guestToken }),
       });
       if (res.ok) return true;
     } catch {
@@ -269,10 +284,14 @@ export const updateRoomDrawing = async (
 export const deleteDrawingRoom = async (roomId: string, userId: string): Promise<boolean> => {
   if (typeof window !== "undefined") {
     try {
+      const guestToken = getGuestToken();
       const res = await fetch(`/api/room/${roomId}`, {
         method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(guestToken ? { "x-guest-token": guestToken } : {}),
+        },
+        body: JSON.stringify({ userId, guestToken }),
       });
       if (res.ok) {
         let rooms = getLocalRooms();

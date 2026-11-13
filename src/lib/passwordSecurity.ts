@@ -82,3 +82,65 @@ export function verifyRoomAccessTicket(ticket: string, roomId: string): boolean 
     return false;
   }
 }
+
+/**
+ * Generates a signed, cryptographic guest session token.
+ * Valid for 30 days. Contains cryptographically verified guest ID, name, and color.
+ */
+export function generateGuestSessionToken(guestId: string, name?: string, color?: string): string {
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + 60 * 60 * 24 * 30; // 30 days
+  const payload = JSON.stringify({
+    guestId,
+    name: name || "Guest Artist",
+    color: color || "#3b82f6",
+    iat: now,
+    exp,
+  });
+  const encodedPayload = Buffer.from(payload).toString("base64url");
+  const signature = crypto
+    .createHmac("sha256", TICKET_SECRET)
+    .update(`guest:${encodedPayload}`)
+    .digest("base64url");
+
+  return `${encodedPayload}.${signature}`;
+}
+
+/**
+ * Validates a signed guest session token and extracts the verified guest identity.
+ * Returns null if token is forged, expired, or invalid.
+ */
+export function verifyGuestSessionToken(
+  token: string | null | undefined
+): { guestId: string; name: string; color: string } | null {
+  if (!token || typeof token !== "string" || !token.includes(".")) return null;
+
+  try {
+    const [encodedPayload, providedSignature] = token.split(".");
+    const expectedSignature = crypto
+      .createHmac("sha256", TICKET_SECRET)
+      .update(`guest:${encodedPayload}`)
+      .digest("base64url");
+
+    if (providedSignature !== expectedSignature) {
+      return null; // Forged signature
+    }
+
+    const payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf-8"));
+    if (!payload.guestId || typeof payload.guestId !== "string" || !payload.guestId.startsWith("guest_")) {
+      return null;
+    }
+
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+      return null; // Expired
+    }
+
+    return {
+      guestId: payload.guestId,
+      name: payload.name,
+      color: payload.color,
+    };
+  } catch {
+    return null;
+  }
+}

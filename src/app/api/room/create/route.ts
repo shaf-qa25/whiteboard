@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerAdmin } from "@/lib/supabaseServerAdmin";
 import { supabase, isSupabaseConfigured } from "@/lib/initSupabase";
 import { hashRoomPassword } from "@/lib/passwordSecurity";
+import { resolveCallerIdentity } from "@/lib/serverAuth";
 
 const DRAWING_ROOM_TABLE = "drawing-rooms";
 
@@ -27,6 +28,16 @@ export async function POST(req: NextRequest) {
 
     if (!UUID_REGEX.test(cleanUserId) && !GUEST_REGEX.test(cleanUserId)) {
       return NextResponse.json({ message: "User ID format is invalid" }, { status: 400 });
+    }
+
+    // Cryptographic Identity Verification (Step 1 - GUEST IDENTITY SECURITY)
+    // If a signed guest token or bearer token is present, enforce caller identity matches requested owner
+    const callerIdentity = await resolveCallerIdentity(req, body);
+    if (callerIdentity && callerIdentity.userId !== cleanUserId) {
+      return NextResponse.json(
+        { message: "Identity mismatch: cannot create room under an unverified user ID" },
+        { status: 401 }
+      );
     }
 
     let hashedPassword: string | null = null;

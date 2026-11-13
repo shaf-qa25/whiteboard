@@ -10,9 +10,23 @@ export interface AppUserSession {
       isGuest?: boolean;
     };
   };
+  guestToken?: string;
 }
 
 const GUEST_STORAGE_KEY = "collabboard_guest_session";
+
+// Retrieve stored server-signed guest token
+export const getGuestToken = (): string | null => {
+  if (typeof window === "undefined") return null;
+  const stored = localStorage.getItem(GUEST_STORAGE_KEY);
+  if (!stored) return null;
+  try {
+    const session = JSON.parse(stored);
+    return session.guestToken || null;
+  } catch {
+    return null;
+  }
+};
 
 // Retrieve current session (Supabase or local Guest fallback)
 export const getUserSession = async (): Promise<AppUserSession | null> => {
@@ -32,17 +46,37 @@ export const getUserSession = async (): Promise<AppUserSession | null> => {
     const stored = localStorage.getItem(GUEST_STORAGE_KEY);
     if (stored) {
       try {
-        return JSON.parse(stored);
+        const parsed = JSON.parse(stored);
+        if (parsed.guestToken) {
+          return parsed;
+        }
       } catch {
         localStorage.removeItem(GUEST_STORAGE_KEY);
       }
     }
   }
 
+  // Generate server-signed guest identity if not present
+  try {
+    const res = await fetch("/api/auth/guest-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (res.ok) {
+      const serverSession = await res.json();
+      if (typeof window !== "undefined") {
+        localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(serverSession));
+      }
+      return serverSession;
+    }
+  } catch (err) {
+    console.warn("Could not acquire server-signed guest token:", err);
+  }
+
   return null;
 };
 
-// Create a guest session for instant zero-configuration testing
+// Create a guest session with server signature
 export const createGuestSession = (name?: string, preferredColor?: string): AppUserSession => {
   const defaultColors = [
     "#3b82f6", // blue
@@ -72,6 +106,19 @@ export const createGuestSession = (name?: string, preferredColor?: string): AppU
 
   if (typeof window !== "undefined") {
     localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(session));
+    // Asynchronously upgrade to server-signed token
+    fetch("/api/auth/guest-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ preferredName: userName, preferredColor: color }),
+    })
+      .then((r) => r.json())
+      .then((serverSession) => {
+        if (serverSession?.guestToken) {
+          localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(serverSession));
+        }
+      })
+      .catch(() => {});
   }
 
   return session;
@@ -165,10 +212,14 @@ export const generateUserVideoToken = async (
   accessTicket?: string | null
 ) => {
   try {
+    const guestToken = getGuestToken();
     const res = await fetch("/api/generate-user-video-instance", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, roomId, accessTicket }),
+      headers: {
+        "Content-Type": "application/json",
+        ...(guestToken ? { "x-guest-token": guestToken } : {}),
+      },
+      body: JSON.stringify({ userId, roomId, accessTicket, guestToken }),
     });
 
     if (!res.ok) {

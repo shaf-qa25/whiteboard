@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerAdmin } from "@/lib/supabaseServerAdmin";
 import { supabase, isSupabaseConfigured } from "@/lib/initSupabase";
 import { verifyRoomAccessTicket } from "@/lib/passwordSecurity";
+import { resolveCallerIdentity } from "@/lib/serverAuth";
 
 const DRAWING_ROOM_TABLE = "drawing-rooms";
 
@@ -39,7 +40,8 @@ export async function POST(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ message: "Room not found" }, { status: 404 });
     }
 
-    const isOwner = Boolean(userId && room.owner === userId);
+    const callerIdentity = await resolveCallerIdentity(req, body);
+    const isOwner = Boolean(callerIdentity && callerIdentity.userId === room.owner);
     const hasValidTicket = Boolean(accessTicket && verifyRoomAccessTicket(accessTicket, roomId));
 
     // If private or password protected, require ownership or valid access ticket

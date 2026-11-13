@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerAdmin } from "@/lib/supabaseServerAdmin";
 import { supabase, isSupabaseConfigured } from "@/lib/initSupabase";
 import { verifyRoomAccessTicket } from "@/lib/passwordSecurity";
+import { resolveCallerIdentity } from "@/lib/serverAuth";
 
 const DRAWING_ROOM_TABLE = "drawing-rooms";
 
@@ -17,7 +18,6 @@ export async function GET(req: NextRequest, context: RouteContext) {
     }
 
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get("userId") || req.headers.get("x-user-id") || "";
     const accessTicket = searchParams.get("ticket") || req.headers.get("x-access-ticket") || "";
 
     const dbClient = getSupabaseServerAdmin() || (isSupabaseConfigured ? supabase : null);
@@ -36,7 +36,9 @@ export async function GET(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ message: "Room not found" }, { status: 404 });
     }
 
-    const isOwner = Boolean(userId && data.owner === userId);
+    // Cryptographically verified identity (never trusts client string alone)
+    const callerIdentity = await resolveCallerIdentity(req);
+    const isOwner = Boolean(callerIdentity && callerIdentity.userId === data.owner);
     const hasValidTicket = Boolean(accessTicket && verifyRoomAccessTicket(accessTicket, roomId));
 
     // Case 1: Private Room
@@ -86,11 +88,6 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
     }
 
     const body = await req.json().catch(() => ({}));
-    const userId = body.userId || req.headers.get("x-user-id");
-
-    if (!userId) {
-      return NextResponse.json({ message: "User ID is required to verify ownership" }, { status: 401 });
-    }
 
     const dbClient = getSupabaseServerAdmin() || (isSupabaseConfigured ? supabase : null);
     if (!dbClient) {
@@ -116,7 +113,9 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
       );
     }
 
-    if (room.owner !== userId) {
+    // Cryptographically verified identity required to delete room
+    const callerIdentity = await resolveCallerIdentity(req, body);
+    if (!callerIdentity || callerIdentity.userId !== room.owner) {
       return NextResponse.json(
         { message: "Forbidden. You cannot delete a room you do not own." },
         { status: 403 }

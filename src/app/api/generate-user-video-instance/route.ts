@@ -4,6 +4,7 @@ import { StreamChat } from "stream-chat";
 import { getSupabaseServerAdmin } from "@/lib/supabaseServerAdmin";
 import { supabase, isSupabaseConfigured } from "@/lib/initSupabase";
 import { verifyRoomAccessTicket } from "@/lib/passwordSecurity";
+import { resolveCallerIdentity } from "@/lib/serverAuth";
 
 const DRAWING_ROOM_TABLE = "drawing-rooms";
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -104,7 +105,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: "Associated room not found" }, { status: 404 });
     }
 
-    const isOwner = room.owner === cleanUserId;
+    const callerIdentity = await resolveCallerIdentity(req, body);
+    const isOwner = Boolean(callerIdentity && callerIdentity.userId === room.owner);
 
     // Private Room Check: non-owner must present valid signed access ticket
     if (!room.isPublic && !isOwner) {
