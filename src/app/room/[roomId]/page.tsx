@@ -7,7 +7,7 @@ import { fetchUserById, getUserSession, AppUserSession } from "@/services/user.s
 import Navbar from "@/components/Navbar";
 import BoardContainer from "@/components/drawing-room/BoardContainer";
 import Spinner from "@/components/videos/Spinner";
-import { Lock, ArrowLeft, KeyRound, AlertCircle } from "lucide-react";
+import { Lock, ArrowLeft, KeyRound, AlertCircle, ShieldAlert } from "lucide-react";
 import Link from "next/link";
 
 interface PageProps {
@@ -41,6 +41,10 @@ function DrawingRoomContent(props: PageProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [participantCount, setParticipantCount] = useState(1);
 
+  // Private room authorization state
+  const [isPrivateForbidden, setIsPrivateForbidden] = useState(false);
+  const [accessTicket, setAccessTicket] = useState<string | null>(null);
+
   // Password-protected private room state
   const [isLocked, setIsLocked] = useState(false);
   const [enteredPassword, setEnteredPassword] = useState("");
@@ -64,24 +68,33 @@ function DrawingRoomContent(props: PageProps) {
         if (isCancelled) return;
         setSession(userSession);
 
-        const roomData = await fetchDrawingRoomById(roomId);
-        if (!roomData || roomData.length === 0) {
-          router.push("/");
+        const { room: currentRoom, isPrivateForbidden: forbidden } = await fetchDrawingRoomById(
+          roomId,
+          userSession.user.id
+        );
+
+        if (forbidden) {
+          if (!isCancelled) {
+            setIsPrivateForbidden(true);
+            setIsLoading(false);
+          }
           return;
         }
 
-        const currentRoom = roomData[0];
+        if (!currentRoom) {
+          if (!isCancelled) {
+            setIsLoading(false);
+          }
+          return;
+        }
+
         const isOwner = currentRoom.owner === userSession.user.id;
 
-        // Check if room is password-protected or private
+        // Check if room is password-protected
         if (currentRoom.isPasswordProtected && !isOwner) {
           setIsLocked(true);
-          // Withhold drawing from state until password is authenticated
+          // Withhold drawing payload from state until authenticated
           setRoom({ ...currentRoom, drawing: null });
-        } else if (!currentRoom.isPublic && !isOwner) {
-          alert("This is a private whiteboard room accessible only to the host.");
-          router.push("/");
-          return;
         } else {
           setRoom(currentRoom);
         }
@@ -125,6 +138,9 @@ function DrawingRoomContent(props: PageProps) {
       );
 
       if (res.success) {
+        if (res.accessTicket) {
+          setAccessTicket(res.accessTicket);
+        }
         if (res.drawing && room) {
           setRoom({ ...room, drawing: res.drawing });
         }
@@ -143,6 +159,34 @@ function DrawingRoomContent(props: PageProps) {
 
   if (isLoading) {
     return <RoomLoadingFallback />;
+  }
+
+  // 403 Forbidden Private Room Gate
+  if (isPrivateForbidden) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-900 p-4">
+        <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950 p-8 text-white shadow-2xl text-center">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-500/10 text-rose-400 mb-4 ring-1 ring-rose-500/20">
+            <ShieldAlert className="h-7 w-7" />
+          </div>
+
+          <h2 className="text-xl font-bold">Private Board — Access Restricted</h2>
+          <p className="mt-2 text-xs text-slate-400 leading-relaxed">
+            This collaborative whiteboard is set to private. You must be the room owner or have an authorized access invitation to enter.
+          </p>
+
+          <div className="mt-6 flex items-center justify-center gap-3">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-500 transition-all cursor-pointer"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              <span>Back to Dashboard</span>
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // Server-Verified Password Unlock Gate

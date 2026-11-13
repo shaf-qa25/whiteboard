@@ -14,6 +14,11 @@ export interface DrawingRoom {
   // NOTE: Password fields are never exposed to the client
 }
 
+export interface FetchRoomResult {
+  room: DrawingRoom | null;
+  isPrivateForbidden?: boolean;
+}
+
 const LOCAL_ROOMS_KEY = "collabboard_local_rooms";
 
 const getLocalRooms = (): DrawingRoom[] => {
@@ -147,9 +152,35 @@ export const fetchPublicDrawingRooms = async (): Promise<DrawingRoom[]> => {
 };
 
 /**
- * Fetches a single drawing room by ID with sanitized fields (password column is NEVER selected)
+ * Fetches a single drawing room by ID via the secure server authorization endpoint.
+ * Enforces server-side authorization: returns 403 for unauthorized private rooms.
  */
-export const fetchDrawingRoomById = async (id: string): Promise<DrawingRoom[] | null> => {
+export const fetchDrawingRoomById = async (
+  id: string,
+  userId?: string,
+  ticket?: string
+): Promise<FetchRoomResult> => {
+  if (typeof window !== "undefined") {
+    try {
+      const q = new URLSearchParams();
+      if (userId) q.set("userId", userId);
+      if (ticket) q.set("ticket", ticket);
+
+      const res = await fetch(`/api/room/${id}?${q.toString()}`);
+      if (res.status === 403) {
+        return { room: null, isPrivateForbidden: true };
+      }
+      if (res.ok) {
+        const data = await res.json();
+        if (data.room) {
+          return { room: data.room };
+        }
+      }
+    } catch (err) {
+      console.warn("fetchDrawingRoomById API failed, attempting fallback:", err);
+    }
+  }
+
   if (isSupabaseConfigured) {
     try {
       const { data, error } = await supabase
@@ -158,7 +189,7 @@ export const fetchDrawingRoomById = async (id: string): Promise<DrawingRoom[] | 
         .eq("id", id);
 
       if (!error && data && data.length > 0) {
-        return data as DrawingRoom[];
+        return { room: data[0] as DrawingRoom };
       }
     } catch (err) {
       console.warn("Supabase fetchDrawingRoomById error:", err);
@@ -168,10 +199,10 @@ export const fetchDrawingRoomById = async (id: string): Promise<DrawingRoom[] | 
   const rooms = getLocalRooms();
   const found = rooms.find((r) => r.id === id);
   if (found) {
-    return [found];
+    return { room: found };
   }
 
-  return null;
+  return { room: null };
 };
 
 /**
@@ -199,22 +230,29 @@ export const verifyRoomPasswordOnServer = async (
   }
 };
 
-export const updateRoomDrawing = async (roomId: string, drawing: string): Promise<void> => {
-  if (isSupabaseConfigured) {
+/**
+ * Updates room canvas drawing via authorized server endpoint
+ */
+export const updateRoomDrawing = async (
+  roomId: string,
+  drawing: string,
+  userId?: string,
+  accessTicket?: string
+): Promise<boolean> => {
+  if (typeof window !== "undefined") {
     try {
-      await supabase
-        .from(DRAWING_ROOM_TABLE)
-        .update({
-          drawing,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", roomId);
-      return;
-    } catch (err) {
-      console.warn("Supabase updateRoomDrawing error:", err);
+      const res = await fetch(`/api/room/${roomId}/drawing`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ drawing, userId, accessTicket }),
+      });
+      if (res.ok) return true;
+    } catch {
+      // ignore
     }
   }
 
+  // Local storage fallback
   const rooms = getLocalRooms();
   const room = rooms.find((r) => r.id === roomId);
   if (room) {
@@ -222,9 +260,31 @@ export const updateRoomDrawing = async (roomId: string, drawing: string): Promis
     room.updated_at = new Date().toISOString();
     saveLocalRooms(rooms);
   }
+  return true;
 };
 
+/**
+ * Deletes drawing room via server ownership check
+ */
 export const deleteDrawingRoom = async (roomId: string, userId: string): Promise<boolean> => {
+  if (typeof window !== "undefined") {
+    try {
+      const res = await fetch(`/api/room/${roomId}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+      if (res.ok) {
+        let rooms = getLocalRooms();
+        rooms = rooms.filter((r) => r.id !== roomId);
+        saveLocalRooms(rooms);
+        return true;
+      }
+    } catch (err) {
+      console.warn("deleteDrawingRoom server API error:", err);
+    }
+  }
+
   if (isSupabaseConfigured) {
     try {
       const { error } = await supabase
