@@ -39,10 +39,23 @@ export default function VideoWrapper({
   const [fallbackCamActive, setFallbackCamActive] = useState(false);
   const [fallbackMicActive, setFallbackMicActive] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const callRef = useRef<any>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
 
   const apiKey =
     process.env.NEXT_PUBLIC_STREAM_CHAT_API_KEY ||
     process.env.STREAM_CHAT_API_KEY;
+
+  // Ensure local media tracks are stopped when component unmounts (Step 6 - FUNC-02)
+  useEffect(() => {
+    return () => {
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((t) => t.stop());
+        localStreamRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let activeClient: StreamVideoClient | null = null;
@@ -92,6 +105,7 @@ export default function VideoWrapper({
         if (!isCancelled) {
           setClient(videoClient);
           const callInstance = videoClient.call("default", callId);
+          callRef.current = callInstance;
           await callInstance.join({ create: true });
           setCall(callInstance);
           setLoading(false);
@@ -109,9 +123,23 @@ export default function VideoWrapper({
 
     return () => {
       isCancelled = true;
+      // Step 6 (FUNC-02): Cleanly leave the Stream call to release remote session and local camera/mic
+      if (callRef.current) {
+        try {
+          callRef.current.leave().catch((err: unknown) => {
+            console.warn("Failed to leave Stream call cleanly:", err);
+          });
+          callRef.current = null;
+        } catch (err) {
+          console.warn("Exception leaving call:", err);
+        }
+      }
+
       if (activeClient) {
         try {
-          activeClient.disconnectUser();
+          activeClient.disconnectUser().catch((err: unknown) => {
+            console.warn("Failed to disconnect Stream video client:", err);
+          });
         } catch {
           // ignore
         }
@@ -122,9 +150,11 @@ export default function VideoWrapper({
   // Handle local camera preview in fallback mode
   const toggleFallbackCamera = async () => {
     if (fallbackCamActive) {
-      if (localStream) {
-        localStream.getVideoTracks().forEach((t) => t.stop());
+      if (localStreamRef.current) {
+        localStreamRef.current.getVideoTracks().forEach((t) => t.stop());
+        localStreamRef.current = null;
       }
+      setLocalStream(null);
       setFallbackCamActive(false);
     } else {
       try {
@@ -132,6 +162,7 @@ export default function VideoWrapper({
           video: true,
           audio: fallbackMicActive,
         });
+        localStreamRef.current = stream;
         setLocalStream(stream);
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
