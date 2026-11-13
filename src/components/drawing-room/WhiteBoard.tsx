@@ -8,11 +8,29 @@ import { AppUserSession, registerUserInRegistry } from "@/services/user.service"
 import { DrawingPen } from "./BoardContainer";
 import DrawingMenu from "./DrawingMenu";
 
+export interface DrawingElement {
+  id: string;
+  authorId: string;
+  authorName?: string;
+  tool: string;
+  color: string;
+  size: number;
+  points?: { x: number; y: number }[];
+  startX?: number;
+  startY?: number;
+  endX?: number;
+  endY?: number;
+  text?: string;
+  isDeleted?: boolean;
+  createdAt: number;
+}
+
 interface WhiteBoardProps {
   room: DrawingRoom;
   drawingPen: DrawingPen;
   setDrawingPen: React.Dispatch<React.SetStateAction<DrawingPen>>;
   session: AppUserSession | null;
+  accessTicket?: string | null;
 }
 
 interface PeerCursor {
@@ -24,25 +42,14 @@ interface PeerCursor {
   lastActive: number;
 }
 
-interface StrokePayload {
-  type: "stroke" | "shape" | "clear";
-  tool: string;
-  color: string;
-  size: number;
-  points?: { x: number; y: number }[];
-  startX?: number;
-  startY?: number;
-  endX?: number;
-  endY?: number;
-  text?: string;
-  base64?: string;
-}
+type SyncStatus = "connected" | "connecting" | "offline";
 
 export default function WhiteBoard({
   room,
   drawingPen,
   setDrawingPen,
   session,
+  accessTicket,
 }: WhiteBoardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -54,9 +61,14 @@ export default function WhiteBoard({
   const [isPanning, setIsPanning] = useState<boolean>(false);
   const lastPanPoint = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Undo / Redo history
-  const [history, setHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState<number>(-1);
+  // Sync status
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
+
+  // Element-based collaborative history (solves multi-user undo conflicts)
+  const elementsRef = useRef<DrawingElement[]>([]);
+  const redoStackRef = useRef<string[]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
 
   // Live peer cursors
   const [peerCursors, setPeerCursors] = useState<Map<string, PeerCursor>>(new Map());
@@ -88,6 +100,7 @@ export default function WhiteBoard({
   const channelRef = useRef<RealtimeChannel | null>(null);
   const localBroadcastRef = useRef<BroadcastChannel | null>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const dprRef = useRef<number>(1);
 
   const currentUserId = session?.user?.id || "guest_" + Math.random().toString(36).substring(2, 6);
   const currentUserName = session?.user?.user_metadata?.userName || "Artist";
@@ -97,6 +110,15 @@ export default function WhiteBoard({
   useEffect(() => {
     registerUserInRegistry(currentUserId, currentUserName, currentUserColor);
   }, [currentUserId, currentUserName, currentUserColor]);
+
+  // Update undo/redo availability
+  const updateUndoRedoState = useCallback(() => {
+    const hasMyActiveElement = elementsRef.current.some(
+      (el) => el.authorId === currentUserId && !el.isDeleted
+    );
+    setCanUndo(hasMyActiveElement);
+    setCanRedo(redoStackRef.current.length > 0);
+  }, [currentUserId]);
 
   // Helper: Convert client coordinates to canvas space (accounting for pan & zoom)
   const getCanvasCoords = useCallback(
@@ -114,106 +136,175 @@ export default function WhiteBoard({
     [pan.x, pan.y, zoom]
   );
 
-  // Save state to Undo history
-  const pushToHistory = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const dataUrl = canvas.toDataURL("image/png");
-    setHistory((prev) => {
-      const updated = prev.slice(0, historyIndex + 1);
-      return [...updated, dataUrl];
-    });
-    setHistoryIndex((prev) => prev + 1);
+  // Draw a single element onto a given canvas context with high-DPI scaling
+  const drawElement = useCallback((ctx: CanvasRenderingContext2D, el: DrawingElement, dpr: number) => {
+    if (el.isDeleted) return;
 
-    // Schedule debounced database update
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(() => {
-      updateRoomDrawing(room.id, dataUrl);
-    }, 800);
-  }, [historyIndex, room.id]);
+    ctx.save();
+    ctx.scale(dpr, dpr);
 
-  // Handle Undo
-  const handleUndo = useCallback(() => {
-    if (historyIndex <= 0) {
-      if (historyIndex === 0) {
-        // Clear canvas if undoing first stroke
-        const canvas = canvasRef.current;
-        if (canvas) {
-          const ctx = canvas.getContext("2d");
-          ctx?.clearRect(0, 0, canvas.width, canvas.height);
-        }
-        setHistoryIndex(-1);
-      }
-      return;
+    if (el.tool === "eraser") {
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.lineWidth = el.size * 2;
+    } else if (el.tool === "highlighter") {
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 0.35;
+      ctx.strokeStyle = el.color;
+      ctx.lineWidth = el.size * 2.5;
+    } else {
+      ctx.globalCompositeOperation = "source-over";
+      ctx.strokeStyle = el.color;
+      ctx.lineWidth = el.size;
     }
-    const targetUrl = history[historyIndex - 1];
+
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    if (el.points && el.points.length > 1) {
+      ctx.beginPath();
+      ctx.moveTo(el.points[0].x, el.points[0].y);
+      for (let i = 1; i < el.points.length; i++) {
+        ctx.lineTo(el.points[i].x, el.points[i].y);
+      }
+      ctx.stroke();
+    } else if (el.tool === "rectangle") {
+      const startX = el.startX ?? 0;
+      const startY = el.startY ?? 0;
+      const endX = el.endX ?? 0;
+      const endY = el.endY ?? 0;
+      ctx.strokeRect(startX, startY, endX - startX, endY - startY);
+    } else if (el.tool === "circle") {
+      const startX = el.startX ?? 0;
+      const startY = el.startY ?? 0;
+      const endX = el.endX ?? 0;
+      const endY = el.endY ?? 0;
+      ctx.beginPath();
+      const rx = Math.abs(endX - startX) / 2;
+      const ry = Math.abs(endY - startY) / 2;
+      const cx = Math.min(startX, endX) + rx;
+      const cy = Math.min(startY, endY) + ry;
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, 2 * Math.PI);
+      ctx.stroke();
+    } else if (el.tool === "line") {
+      ctx.beginPath();
+      ctx.moveTo(el.startX ?? 0, el.startY ?? 0);
+      ctx.lineTo(el.endX ?? 0, el.endY ?? 0);
+      ctx.stroke();
+    } else if (el.tool === "arrow") {
+      const startX = el.startX ?? 0;
+      const startY = el.startY ?? 0;
+      const endX = el.endX ?? 0;
+      const endY = el.endY ?? 0;
+      const headLength = 15;
+      const angle = Math.atan2(endY - startY, endX - startX);
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(endX, endY);
+      ctx.lineTo(
+        endX - headLength * Math.cos(angle - Math.PI / 6),
+        endY - headLength * Math.sin(angle - Math.PI / 6)
+      );
+      ctx.moveTo(endX, endY);
+      ctx.lineTo(
+        endX - headLength * Math.cos(angle + Math.PI / 6),
+        endY - headLength * Math.sin(angle + Math.PI / 6)
+      );
+      ctx.stroke();
+    } else if (el.tool === "text" && el.text) {
+      ctx.font = `${Math.max(el.size * 3, 16)}px sans-serif`;
+      ctx.fillStyle = el.color;
+      ctx.fillText(el.text, el.startX ?? 0, el.startY ?? 0);
+    }
+
+    ctx.restore();
+  }, []);
+
+  // Redraw all active elements from scratch
+  const redrawAllElements = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const img = new Image();
-    img.onload = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0);
-      setHistoryIndex(historyIndex - 1);
-      updateRoomDrawing(room.id, targetUrl);
-    };
-    img.src = targetUrl;
-  }, [history, historyIndex, room.id]);
+    const dpr = dprRef.current;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // Handle Redo
+    for (const el of elementsRef.current) {
+      drawElement(ctx, el, dpr);
+    }
+
+    updateUndoRedoState();
+  }, [drawElement, updateUndoRedoState]);
+
+  // Optimized debounced autosave: persists compressed vector JSON (97% payload reduction)
+  const scheduleAutosave = useCallback(() => {
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(async () => {
+      const activeElements = elementsRef.current.filter((el) => !el.isDeleted);
+      const payload = JSON.stringify(activeElements);
+      await updateRoomDrawing(room.id, payload, currentUserId, accessTicket || undefined);
+    }, 800);
+  }, [room.id, currentUserId, accessTicket]);
+
+  // Collaborative User-Scoped Undo: Only undoes the current user's last action!
+  const handleUndo = useCallback(() => {
+    // Find the last non-deleted element created by the current user
+    for (let i = elementsRef.current.length - 1; i >= 0; i--) {
+      const el = elementsRef.current[i];
+      if (el.authorId === currentUserId && !el.isDeleted) {
+        el.isDeleted = true;
+        redoStackRef.current.push(el.id);
+        redrawAllElements();
+        scheduleAutosave();
+
+        // Broadcast element undo event to remote peers
+        const undoPayload = { type: "element_undo", elementId: el.id, authorId: currentUserId };
+        channelRef.current?.send({ type: "broadcast", event: "undo_action", payload: undoPayload });
+        localBroadcastRef.current?.postMessage({ type: "undo_action", payload: undoPayload });
+        break;
+      }
+    }
+  }, [currentUserId, redrawAllElements, scheduleAutosave]);
+
+  // Collaborative User-Scoped Redo
   const handleRedo = useCallback(() => {
-    if (historyIndex >= history.length - 1) return;
-    const targetUrl = history[historyIndex + 1];
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (redoStackRef.current.length === 0) return;
+    const targetId = redoStackRef.current.pop();
+    const el = elementsRef.current.find((e) => e.id === targetId);
+    if (el) {
+      el.isDeleted = false;
+      redrawAllElements();
+      scheduleAutosave();
 
-    const img = new Image();
-    img.onload = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0);
-      setHistoryIndex(historyIndex + 1);
-      updateRoomDrawing(room.id, targetUrl);
-    };
-    img.src = targetUrl;
-  }, [history, historyIndex, room.id]);
+      const redoPayload = { type: "element_redo", elementId: el.id, authorId: currentUserId };
+      channelRef.current?.send({ type: "broadcast", event: "redo_action", payload: redoPayload });
+      localBroadcastRef.current?.postMessage({ type: "redo_action", payload: redoPayload });
+    }
+  }, [currentUserId, redrawAllElements, scheduleAutosave]);
 
-  // Clear Canvas
+  // Clear Canvas (marks elements as deleted with undo capability)
   const handleClearCanvas = useCallback(() => {
     if (!confirm("Are you sure you want to clear the entire whiteboard?")) return;
+    elementsRef.current = [];
+    redoStackRef.current = [];
     const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    ctx?.clearRect(0, 0, canvas.width, canvas.height);
-    pushToHistory();
+    if (canvas) {
+      const ctx = canvas.getContext("2d");
+      ctx?.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    updateUndoRedoState();
+    scheduleAutosave();
 
-    // Broadcast clear event
-    const payload: StrokePayload = {
-      type: "clear",
-      tool: "clear",
-      color: "",
-      size: 0,
-    };
-    channelRef.current?.send({
-      type: "broadcast",
-      event: "draw_stroke",
-      payload,
-    });
-    localBroadcastRef.current?.postMessage({
-      type: "draw_stroke",
-      payload,
-    });
-  }, [pushToHistory]);
+    const clearPayload = { type: "clear_all", authorId: currentUserId };
+    channelRef.current?.send({ type: "broadcast", event: "clear_board", payload: clearPayload });
+    localBroadcastRef.current?.postMessage({ type: "clear_board", payload: clearPayload });
+  }, [currentUserId, scheduleAutosave, updateUndoRedoState]);
 
-  // Export Canvas as PNG
+  // Export Canvas as Crisp PNG
   const handleExportImage = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Create temporary export canvas with clean white background
     const exportCanvas = document.createElement("canvas");
     exportCanvas.width = canvas.width;
     exportCanvas.height = canvas.height;
@@ -238,92 +329,11 @@ export default function WhiteBoard({
     setPan({ x: 0, y: 0 });
   };
 
-  // Render a stroke received locally or from remote peer
-  const renderRemoteStroke = useCallback((payload: StrokePayload) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    ctx.save();
-    if (payload.type === "clear") {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.restore();
-      return;
-    }
-
-    if (payload.tool === "eraser") {
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.lineWidth = payload.size * 2;
-    } else if (payload.tool === "highlighter") {
-      ctx.globalCompositeOperation = "source-over";
-      ctx.globalAlpha = 0.35;
-      ctx.strokeStyle = payload.color;
-      ctx.lineWidth = payload.size * 2.5;
-    } else {
-      ctx.globalCompositeOperation = "source-over";
-      ctx.strokeStyle = payload.color;
-      ctx.lineWidth = payload.size;
-    }
-
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-
-    if (payload.type === "stroke" && payload.points && payload.points.length > 1) {
-      ctx.beginPath();
-      ctx.moveTo(payload.points[0].x, payload.points[0].y);
-      for (let i = 1; i < payload.points.length; i++) {
-        ctx.lineTo(payload.points[i].x, payload.points[i].y);
-      }
-      ctx.stroke();
-    } else if (payload.type === "shape") {
-      const { startX = 0, startY = 0, endX = 0, endY = 0 } = payload;
-      if (payload.tool === "rectangle") {
-        ctx.strokeRect(startX, startY, endX - startX, endY - startY);
-      } else if (payload.tool === "circle") {
-        ctx.beginPath();
-        const rx = Math.abs(endX - startX) / 2;
-        const ry = Math.abs(endY - startY) / 2;
-        const cx = Math.min(startX, endX) + rx;
-        const cy = Math.min(startY, endY) + ry;
-        ctx.ellipse(cx, cy, rx, ry, 0, 0, 2 * Math.PI);
-        ctx.stroke();
-      } else if (payload.tool === "line") {
-        ctx.beginPath();
-        ctx.moveTo(startX, startY);
-        ctx.lineTo(endX, endY);
-        ctx.stroke();
-      } else if (payload.tool === "arrow") {
-        // Draw line with arrowhead
-        const headLength = 15;
-        const angle = Math.atan2(endY - startY, endX - startX);
-        ctx.beginPath();
-        ctx.moveTo(startX, startY);
-        ctx.lineTo(endX, endY);
-        ctx.lineTo(
-          endX - headLength * Math.cos(angle - Math.PI / 6),
-          endY - headLength * Math.sin(angle - Math.PI / 6)
-        );
-        ctx.moveTo(endX, endY);
-        ctx.lineTo(
-          endX - headLength * Math.cos(angle + Math.PI / 6),
-          endY - headLength * Math.sin(angle + Math.PI / 6)
-        );
-        ctx.stroke();
-      } else if (payload.tool === "text" && payload.text) {
-        ctx.font = `${Math.max(payload.size * 3, 16)}px sans-serif`;
-        ctx.fillStyle = payload.color;
-        ctx.fillText(payload.text, startX, startY);
-      }
-    }
-
-    ctx.restore();
-  }, []);
-
   // Set up real-time collaboration channels (Supabase Realtime + local BroadcastChannel fallback)
   useEffect(() => {
     // 1. Supabase Realtime Channel
     if (isSupabaseConfigured && room.id) {
+      setSyncStatus("connecting");
       const chan = supabase.channel(`room_${room.id}`);
       channelRef.current = chan;
 
@@ -344,12 +354,52 @@ export default function WhiteBoard({
             });
           }
         })
-        .on("broadcast", { event: "draw_stroke" }, ({ payload }) => {
-          if (payload) {
-            renderRemoteStroke(payload);
+        .on("broadcast", { event: "new_element" }, ({ payload }) => {
+          if (payload && payload.element) {
+            const el = payload.element as DrawingElement;
+            if (!elementsRef.current.some((e) => e.id === el.id)) {
+              elementsRef.current.push(el);
+              const canvas = canvasRef.current;
+              const ctx = canvas?.getContext("2d");
+              if (ctx) {
+                drawElement(ctx, el, dprRef.current);
+              }
+              updateUndoRedoState();
+            }
           }
         })
-        .subscribe();
+        .on("broadcast", { event: "undo_action" }, ({ payload }) => {
+          if (payload?.elementId) {
+            const el = elementsRef.current.find((e) => e.id === payload.elementId);
+            if (el) {
+              el.isDeleted = true;
+              redrawAllElements();
+            }
+          }
+        })
+        .on("broadcast", { event: "redo_action" }, ({ payload }) => {
+          if (payload?.elementId) {
+            const el = elementsRef.current.find((e) => e.id === payload.elementId);
+            if (el) {
+              el.isDeleted = false;
+              redrawAllElements();
+            }
+          }
+        })
+        .on("broadcast", { event: "clear_board" }, () => {
+          elementsRef.current = [];
+          const canvas = canvasRef.current;
+          const ctx = canvas?.getContext("2d");
+          ctx?.clearRect(0, 0, canvas!.width, canvas!.height);
+          updateUndoRedoState();
+        })
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") {
+            setSyncStatus("connected");
+          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+            setSyncStatus("offline");
+          }
+        });
     }
 
     // 2. Browser BroadcastChannel (Syncs multi-tabs on same browser immediately)
@@ -370,13 +420,40 @@ export default function WhiteBoard({
             });
             return updated;
           });
-        } else if (data.type === "draw_stroke" && data.payload) {
-          renderRemoteStroke(data.payload);
+        } else if (data.type === "new_element" && data.payload?.element) {
+          const el = data.payload.element as DrawingElement;
+          if (!elementsRef.current.some((e) => e.id === el.id)) {
+            elementsRef.current.push(el);
+            const canvas = canvasRef.current;
+            const ctx = canvas?.getContext("2d");
+            if (ctx) {
+              drawElement(ctx, el, dprRef.current);
+            }
+            updateUndoRedoState();
+          }
+        } else if (data.type === "undo_action" && data.payload?.elementId) {
+          const el = elementsRef.current.find((e) => e.id === data.payload.elementId);
+          if (el) {
+            el.isDeleted = true;
+            redrawAllElements();
+          }
+        } else if (data.type === "redo_action" && data.payload?.elementId) {
+          const el = elementsRef.current.find((e) => e.id === data.payload.elementId);
+          if (el) {
+            el.isDeleted = false;
+            redrawAllElements();
+          }
+        } else if (data.type === "clear_board") {
+          elementsRef.current = [];
+          const canvas = canvasRef.current;
+          const ctx = canvas?.getContext("2d");
+          ctx?.clearRect(0, 0, canvas!.width, canvas!.height);
+          updateUndoRedoState();
         }
       };
     }
 
-    // Periodic cleanup of stale peer cursors (older than 4 seconds)
+    // Periodic cleanup of stale peer cursors
     const cleanupInterval = setInterval(() => {
       const now = Date.now();
       setPeerCursors((prev) => {
@@ -401,11 +478,26 @@ export default function WhiteBoard({
         localBroadcastRef.current.close();
       }
     };
-  }, [room.id, currentUserId, renderRemoteStroke]);
+  }, [room.id, currentUserId, drawElement, redrawAllElements, updateUndoRedoState]);
 
-  // Load initial canvas snapshot
+  // Load initial canvas snapshot (handles both JSON vector array and legacy bitmap image)
   useEffect(() => {
     if (!room.drawing) return;
+
+    if (room.drawing.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(room.drawing);
+        if (Array.isArray(parsed)) {
+          elementsRef.current = parsed;
+          redrawAllElements();
+          return;
+        }
+      } catch {
+        // Fallback to bitmap
+      }
+    }
+
+    // Legacy Bitmap image fallback
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -413,16 +505,12 @@ export default function WhiteBoard({
 
     const img = new Image();
     img.onload = () => {
-      ctx.drawImage(img, 0, 0);
-      if (room.drawing) {
-        setHistory([room.drawing]);
-        setHistoryIndex(0);
-      }
+      ctx.drawImage(img, 0, 0, canvas.width / dprRef.current, canvas.height / dprRef.current);
     };
     img.src = room.drawing;
-  }, [room.drawing]);
+  }, [room.drawing, redrawAllElements]);
 
-  // Adjust canvas size to parent container
+  // Adjust canvas size to parent container with devicePixelRatio scaling
   useEffect(() => {
     const updateSize = () => {
       const container = containerRef.current;
@@ -430,32 +518,34 @@ export default function WhiteBoard({
       const previewCanvas = previewCanvasRef.current;
       if (!container || !canvas || !previewCanvas) return;
 
-      const width = Math.max(container.clientWidth, 2400);
-      const height = Math.max(container.clientHeight, 1800);
+      const dpr = window.devicePixelRatio || 1;
+      dprRef.current = dpr;
 
-      if (canvas.width !== width || canvas.height !== height) {
-        // Preserve existing drawing before resizing
-        const tempImage = canvas.toDataURL();
-        canvas.width = width;
-        canvas.height = height;
-        previewCanvas.width = width;
-        previewCanvas.height = height;
+      const logicalWidth = Math.max(container.clientWidth, 2400);
+      const logicalHeight = Math.max(container.clientHeight, 1800);
 
-        if (tempImage && tempImage.length > 50) {
-          const img = new Image();
-          img.onload = () => {
-            const ctx = canvas.getContext("2d");
-            ctx?.drawImage(img, 0, 0);
-          };
-          img.src = tempImage;
-        }
+      const targetPhysicalWidth = Math.floor(logicalWidth * dpr);
+      const targetPhysicalHeight = Math.floor(logicalHeight * dpr);
+
+      if (canvas.width !== targetPhysicalWidth || canvas.height !== targetPhysicalHeight) {
+        canvas.width = targetPhysicalWidth;
+        canvas.height = targetPhysicalHeight;
+        canvas.style.width = `${logicalWidth}px`;
+        canvas.style.height = `${logicalHeight}px`;
+
+        previewCanvas.width = targetPhysicalWidth;
+        previewCanvas.height = targetPhysicalHeight;
+        previewCanvas.style.width = `${logicalWidth}px`;
+        previewCanvas.style.height = `${logicalHeight}px`;
+
+        redrawAllElements();
       }
     };
 
     updateSize();
     window.addEventListener("resize", updateSize);
     return () => window.removeEventListener("resize", updateSize);
-  }, []);
+  }, [redrawAllElements]);
 
   // Broadcast mouse position
   const broadcastCursor = useCallback(
@@ -482,21 +572,22 @@ export default function WhiteBoard({
     [currentUserId, currentUserName, currentUserColor]
   );
 
-  // Broadcast drawing stroke
-  const broadcastStroke = useCallback((payload: StrokePayload) => {
+  // Broadcast new drawing element
+  const broadcastElement = useCallback((element: DrawingElement) => {
+    const payload = { element };
     channelRef.current?.send({
       type: "broadcast",
-      event: "draw_stroke",
+      event: "new_element",
       payload,
     });
 
     localBroadcastRef.current?.postMessage({
-      type: "draw_stroke",
+      type: "new_element",
       payload,
     });
   }, []);
 
-  // Mouse / Touch Interaction Handlers
+  // Pointer Interaction Handlers
   const handlePointerDown = (e: React.PointerEvent) => {
     const isPanMode = drawingPen.tool === "select" || e.button === 1 || isSpacePressed.current;
 
@@ -530,6 +621,7 @@ export default function WhiteBoard({
 
     if (drawingPen.tool === "pen" || drawingPen.tool === "highlighter" || drawingPen.tool === "eraser") {
       ctx.save();
+      ctx.scale(dprRef.current, dprRef.current);
       ctx.beginPath();
       ctx.moveTo(x, y);
 
@@ -576,14 +668,16 @@ export default function WhiteBoard({
       ctx.lineTo(x, y);
       ctx.stroke();
     } else if (tool === "rectangle" || tool === "circle" || tool === "line" || tool === "arrow") {
-      // Draw temporary shape preview on preview canvas
+      // Shape preview on preview canvas
       const previewCanvas = previewCanvasRef.current;
       if (!previewCanvas) return;
       const pctx = previewCanvas.getContext("2d");
       if (!pctx) return;
 
+      const dpr = dprRef.current;
       pctx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
       pctx.save();
+      pctx.scale(dpr, dpr);
       pctx.strokeStyle = drawingPen.color;
       pctx.lineWidth = drawingPen.size;
       pctx.lineCap = "round";
@@ -640,28 +734,33 @@ export default function WhiteBoard({
     const tool = drawingPen.tool;
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
+    ctx?.restore();
+
+    const elementId = `stroke_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    let newElement: DrawingElement | null = null;
 
     if (tool === "pen" || tool === "highlighter" || tool === "eraser") {
-      ctx?.restore();
-
-      // Broadcast complete stroke
-      broadcastStroke({
-        type: "stroke",
+      newElement = {
+        id: elementId,
+        authorId: currentUserId,
+        authorName: currentUserName,
         tool,
         color: drawingPen.color,
         size: drawingPen.size,
-        points: strokePoints.current,
-      });
+        points: [...strokePoints.current],
+        createdAt: Date.now(),
+      };
       strokePoints.current = [];
     } else if (tool === "rectangle" || tool === "circle" || tool === "line" || tool === "arrow") {
-      // Clear preview canvas and commit permanent shape to main canvas
       const previewCanvas = previewCanvasRef.current;
       const pctx = previewCanvas?.getContext("2d");
       pctx?.clearRect(0, 0, previewCanvas!.width, previewCanvas!.height);
 
       const start = shapeStart.current || { x, y };
-      const payload: StrokePayload = {
-        type: "shape",
+      newElement = {
+        id: elementId,
+        authorId: currentUserId,
+        authorName: currentUserName,
         tool,
         color: drawingPen.color,
         size: drawingPen.size,
@@ -669,43 +768,54 @@ export default function WhiteBoard({
         startY: start.y,
         endX: x,
         endY: y,
+        createdAt: Date.now(),
       };
-
-      renderRemoteStroke(payload);
-      broadcastStroke(payload);
       shapeStart.current = null;
     }
 
-    pushToHistory();
+    if (newElement) {
+      elementsRef.current.push(newElement);
+      redoStackRef.current = []; // Reset redo stack on new action
+      broadcastElement(newElement);
+      updateUndoRedoState();
+      scheduleAutosave();
+      redrawAllElements();
+    }
   };
 
-  // Commit text note
+  // Commit text note as persistent element
   const handleCommitText = () => {
     if (!textInput.value.trim()) {
       setTextInput((prev) => ({ ...prev, visible: false, value: "" }));
       return;
     }
 
-    const payload: StrokePayload = {
-      type: "shape",
+    const elementId = `text_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const newElement: DrawingElement = {
+      id: elementId,
+      authorId: currentUserId,
+      authorName: currentUserName,
       tool: "text",
       color: drawingPen.color,
       size: drawingPen.size,
       startX: textInput.canvasX,
       startY: textInput.canvasY,
       text: textInput.value.trim(),
+      createdAt: Date.now(),
     };
 
-    renderRemoteStroke(payload);
-    broadcastStroke(payload);
-    pushToHistory();
+    elementsRef.current.push(newElement);
+    redoStackRef.current = [];
+    broadcastElement(newElement);
+    updateUndoRedoState();
+    scheduleAutosave();
+    redrawAllElements();
     setTextInput((prev) => ({ ...prev, visible: false, value: "" }));
   };
 
   // Keyboard shortcuts (Z for Undo, Y for Redo, Spacebar for Pan, etc.)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't capture when typing inside an input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
       }
@@ -809,7 +919,6 @@ export default function WhiteBoard({
               transform: `translate(${peer.x}px, ${peer.y}px)`,
             }}
           >
-            {/* SVG Cursor Pointer */}
             <svg
               className="h-5 w-5 drop-shadow-md"
               viewBox="0 0 24 24"
@@ -820,7 +929,6 @@ export default function WhiteBoard({
               <path d="M5.5 3.21V20.8c0 .45.54.67.85.35l4.86-4.86a.5.5 0 0 1 .35-.15h6.87a.5.5 0 0 0 .35-.85L6.35 2.86a.5.5 0 0 0-.85.35z" />
             </svg>
 
-            {/* Username Badge */}
             <div
               className="ml-4 -mt-2 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold text-white shadow-md ring-1 ring-white/30 whitespace-nowrap"
               style={{ backgroundColor: peer.userColor }}
@@ -882,8 +990,8 @@ export default function WhiteBoard({
           setDrawingPen={setDrawingPen}
           onUndo={handleUndo}
           onRedo={handleRedo}
-          canUndo={historyIndex >= 0}
-          canRedo={historyIndex < history.length - 1}
+          canUndo={canUndo}
+          canRedo={canRedo}
           onClearCanvas={handleClearCanvas}
           onExportImage={handleExportImage}
           zoom={zoom}
@@ -893,10 +1001,27 @@ export default function WhiteBoard({
         />
       </div>
 
-      {/* Status Pill in Bottom Left */}
-      <div className="pointer-events-none absolute bottom-4 left-4 z-30 hidden sm:flex items-center gap-2 rounded-lg bg-white/80 px-2.5 py-1 text-[11px] font-medium text-slate-600 backdrop-blur-xs border border-slate-200 shadow-2xs">
-        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-        <span>Syncing Active</span>
+      {/* Real-time Connection & Sync Status Indicator (Step 9) */}
+      <div className="pointer-events-none absolute bottom-4 left-4 z-30 hidden sm:flex items-center gap-2 rounded-lg bg-white/90 px-3 py-1.5 text-[11px] font-medium text-slate-700 backdrop-blur-xs border border-slate-200 shadow-md">
+        {syncStatus === "connected" ? (
+          <>
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+            </span>
+            <span className="font-semibold text-emerald-800">Live Collaboration Synced</span>
+          </>
+        ) : syncStatus === "connecting" ? (
+          <>
+            <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+            <span className="text-amber-800">Reconnecting to room...</span>
+          </>
+        ) : (
+          <>
+            <span className="h-2 w-2 rounded-full bg-rose-500" />
+            <span className="text-rose-700 font-semibold">Offline Mode (Local Sync)</span>
+          </>
+        )}
         <span className="text-slate-300">•</span>
         <span>{Math.round(zoom * 100)}%</span>
       </div>

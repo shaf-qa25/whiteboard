@@ -29,12 +29,14 @@ interface BoardContainerProps {
   room: DrawingRoom;
   session: AppUserSession | null;
   setParticipantCount?: (count: number) => void;
+  accessTicket?: string | null;
 }
 
 export default function BoardContainer({
   room,
   session,
   setParticipantCount,
+  accessTicket,
 }: BoardContainerProps) {
   const [drawingPen, setDrawingPen] = useState<DrawingPen>({
     tool: "pen",
@@ -53,6 +55,7 @@ export default function BoardContainer({
           drawingPen={drawingPen}
           setDrawingPen={setDrawingPen}
           session={session}
+          accessTicket={accessTicket}
         />
       </div>
 

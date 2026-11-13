@@ -284,6 +284,7 @@ function DrawingRoomContent(props: PageProps) {
         room={room}
         session={session}
         setParticipantCount={setParticipantCount}
+        accessTicket={accessTicket}
       />
     </div>
   );
