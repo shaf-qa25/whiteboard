@@ -121,7 +121,16 @@ export const fetchUserDrawingRooms = async (userId: string): Promise<DrawingRoom
         .order("created_at", { ascending: false });
 
       if (!error && data) {
-        return data as DrawingRoom[];
+        // Merge with local rooms created on this device (so guest-created private rooms appear in their own dashboard)
+        const localRooms = getLocalRooms().filter((r) => r.owner === userId);
+        const map = new Map<string, DrawingRoom>();
+        (data as DrawingRoom[]).forEach((r) => map.set(r.id, r));
+        localRooms.forEach((r) => {
+          if (!map.has(r.id)) {
+            map.set(r.id, r);
+          }
+        });
+        return Array.from(map.values());
       }
     } catch (err) {
       console.warn("Supabase fetchUserDrawingRooms error:", err);
