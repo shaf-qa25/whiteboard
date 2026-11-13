@@ -1,6 +1,8 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const rawUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+// Normalize URL (strip trailing /rest/v1 or slashes if user pasted full REST endpoint)
+const supabaseUrl = rawUrl.replace(/\/rest\/v1\/?$/, "").replace(/\/+$/, "");
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_API_KEY || "";
 const serviceRoleKey = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_SECRET || "";
 
