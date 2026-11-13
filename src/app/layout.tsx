@@ -14,8 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CollabBoard — Real-Time Collaborative Whiteboard & Video",
-  description: "Next.js collaborative whiteboard powered by Supabase Real-time and Stream Video calling SDK.",
+  title: "CollabBoard — Real-Time Collaborative Whiteboard",
+  description:
+    "An editorial, high-performance collaborative digital whiteboard. Featuring real-time vector canvas, live cursors, password protection, and Stream Video calling.",
 };
 
 export default function RootLayout({
@@ -28,7 +29,9 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-slate-50 text-slate-900">{children}</body>
+      <body className="min-h-full flex flex-col bg-[#fffefb] text-[#171717]">
+        {children}
+      </body>
     </html>
   );
 }

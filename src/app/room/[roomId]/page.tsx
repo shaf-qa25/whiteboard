@@ -7,7 +7,7 @@ import { fetchUserById, getUserSession, AppUserSession } from "@/services/user.s
 import Navbar from "@/components/Navbar";
 import BoardContainer from "@/components/drawing-room/BoardContainer";
 import Spinner from "@/components/videos/Spinner";
-import { Lock, ArrowLeft, KeyRound, AlertCircle, ShieldAlert } from "lucide-react";
+import { Lock, ArrowLeft, KeyRound, AlertCircle, ShieldAlert, PenTool } from "lucide-react";
 import Link from "next/link";
 
 interface PageProps {
@@ -16,12 +16,15 @@ interface PageProps {
 
 function RoomLoadingFallback() {
   return (
-    <div className="flex h-screen w-full flex-col items-center justify-center bg-slate-900 text-white gap-3">
-      <Spinner className="h-8 w-8 text-blue-500" />
-      <span className="text-sm font-semibold tracking-wide">
-        Connecting to drawing room...
-      </span>
-      <span className="text-xs text-slate-400">Loading canvas objects & live presence</span>
+    <div className="flex h-screen w-full flex-col items-center justify-center bg-dotted-grid text-[#171717] gap-3">
+      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#171717] text-[#fffefb] shadow-paper">
+        <PenTool className="h-6 w-6 text-[#d95b35]" />
+      </div>
+      <div className="flex items-center gap-2 text-xs font-semibold text-[#171717]">
+        <Spinner className="h-4 w-4 text-[#d95b35]" />
+        <span>Connecting to collaborative studio...</span>
+      </div>
+      <span className="text-[11px] text-[#77736d]">Loading canvas strokes & live presence</span>
     </div>
   );
 }
@@ -147,11 +150,11 @@ function DrawingRoomContent(props: PageProps) {
         setIsLocked(false);
       } else {
         setPasswordError(true);
-        setPasswordErrorMessage(res.message || "Incorrect password. Please try again.");
+        setPasswordErrorMessage(res.message || "Incorrect passcode. Please try again.");
       }
     } catch {
       setPasswordError(true);
-      setPasswordErrorMessage("Failed to verify password. Please try again.");
+      setPasswordErrorMessage("Failed to verify passcode. Please try again.");
     } finally {
       setIsVerifying(false);
     }
@@ -164,24 +167,24 @@ function DrawingRoomContent(props: PageProps) {
   // 403 Forbidden Private Room Gate
   if (isPrivateForbidden) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-900 p-4">
-        <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950 p-8 text-white shadow-2xl text-center">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-500/10 text-rose-400 mb-4 ring-1 ring-rose-500/20">
+      <div className="flex min-h-screen items-center justify-center bg-dotted-grid p-4 selection:bg-[#fdf0e7] selection:text-[#d95b35]">
+        <div className="w-full max-w-md rounded-2xl border border-[#e8e5df] bg-[#ffffff] p-8 text-[#171717] shadow-paper text-center">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[#fdf0e7] text-[#d95b35] mb-4 border border-[#fbd7c3]">
             <ShieldAlert className="h-7 w-7" />
           </div>
 
-          <h2 className="text-xl font-bold">Private Board — Access Restricted</h2>
-          <p className="mt-2 text-xs text-slate-400 leading-relaxed">
-            This collaborative whiteboard is set to private. You must be the room owner or have an authorized access invitation to enter.
+          <h2 className="text-xl font-bold tracking-tight">Private Board — Access Restricted</h2>
+          <p className="mt-2 text-xs text-[#77736d] leading-relaxed">
+            This collaborative whiteboard is set to private. You must be the room owner or hold an authorized cryptographic invite token to enter.
           </p>
 
           <div className="mt-6 flex items-center justify-center gap-3">
             <Link
-              href="/"
-              className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-500 transition-all cursor-pointer"
+              href="/dashboard"
+              className="inline-flex items-center gap-2 rounded-xl bg-[#171717] px-5 py-2.5 text-xs font-semibold text-[#fffefb] hover:bg-[#2b2b2b] transition-all shadow-xs"
             >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              <span>Back to Dashboard</span>
+              <ArrowLeft className="h-3.5 w-3.5 text-[#d95b35]" />
+              <span>Back to Workspace</span>
             </Link>
           </div>
         </div>
@@ -192,59 +195,59 @@ function DrawingRoomContent(props: PageProps) {
   // Server-Verified Password Unlock Gate
   if (isLocked) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-900 p-4">
-        <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950 p-6 text-white shadow-2xl">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-400 mb-4 ring-1 ring-amber-500/20">
-            <Lock className="h-6 w-6" />
+      <div className="flex min-h-screen items-center justify-center bg-dotted-grid p-4 selection:bg-[#fdf0e7] selection:text-[#d95b35]">
+        <div className="w-full max-w-md rounded-2xl border border-[#e8e5df] bg-[#ffffff] p-7 text-[#171717] shadow-paper-modal">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#faf8f3] text-[#d95b35] mb-3 border border-[#e8e5df]">
+            <KeyRound className="h-6 w-6" />
           </div>
 
-          <h2 className="text-center text-lg font-bold">This Whiteboard is Password Protected</h2>
-          <p className="mt-1 text-center text-xs text-slate-400">
-            Enter the room password provided by the host to join and collaborate.
+          <h2 className="text-center text-lg font-bold">Passcode Protected Board</h2>
+          <p className="mt-1 text-center text-xs text-[#77736d]">
+            Enter the whiteboard passcode provided by the host to unlock the canvas and join live video.
           </p>
 
           {passwordError && (
-            <div className="mt-4 flex items-center gap-2 rounded-xl bg-rose-500/10 p-3 text-xs text-rose-400 border border-rose-500/20">
-              <AlertCircle className="h-4 w-4 shrink-0" />
-              <span>{passwordErrorMessage || "Incorrect password. Please try again."}</span>
+            <div className="mt-4 flex items-center gap-2 rounded-xl bg-[#fdf0e7] p-3 text-xs text-[#9c3e1e] border border-[#fbd7c3]">
+              <AlertCircle className="h-4 w-4 shrink-0 text-[#d95b35]" />
+              <span>{passwordErrorMessage || "Incorrect passcode. Please try again."}</span>
             </div>
           )}
 
           <form onSubmit={handleUnlockRoom} className="mt-5 space-y-4">
             <div className="relative">
-              <KeyRound className="absolute left-3.5 top-3 h-4 w-4 text-slate-500" />
+              <KeyRound className="absolute left-3.5 top-3 h-4 w-4 text-[#77736d]" />
               <input
                 type="password"
-                placeholder="Enter password..."
+                placeholder="Enter room passcode..."
                 value={enteredPassword}
                 onChange={(e) => setEnteredPassword(e.target.value)}
                 autoFocus
                 disabled={isVerifying}
-                className="w-full rounded-xl border border-slate-800 bg-slate-900 pl-10 pr-3.5 py-2.5 text-xs text-white placeholder:text-slate-500 focus:border-blue-500 focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 disabled:opacity-50"
+                className="w-full rounded-xl border border-[#e8e5df] bg-white pl-10 pr-3.5 py-2.5 text-xs text-[#171717] placeholder:text-[#9c978f] focus:border-[#171717] focus:outline-hidden disabled:opacity-50 transition-colors"
               />
             </div>
 
             <div className="flex items-center gap-2">
               <Link
-                href="/"
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-800 bg-slate-900 px-4 py-2.5 text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-colors"
+                href="/dashboard"
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-[#e8e5df] bg-[#ffffff] px-4 py-2.5 text-xs font-semibold text-[#77736d] hover:bg-[#faf8f3] hover:text-[#171717] transition-colors"
               >
                 <ArrowLeft className="h-3.5 w-3.5" />
-                <span>Dashboard</span>
+                <span>Workspace</span>
               </Link>
 
               <button
                 type="submit"
                 disabled={isVerifying}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-blue-500 transition-all cursor-pointer disabled:opacity-50"
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#171717] px-4 py-2.5 text-xs font-semibold text-[#fffefb] shadow-xs hover:bg-[#2b2b2b] transition-all cursor-pointer disabled:opacity-50"
               >
                 {isVerifying ? (
                   <>
-                    <Spinner className="h-3.5 w-3.5 text-white" />
+                    <Spinner className="h-3.5 w-3.5 text-[#d95b35]" />
                     <span>Verifying...</span>
                   </>
                 ) : (
-                  <span>Unlock & Join</span>
+                  <span>Unlock Canvas</span>
                 )}
               </button>
             </div>
@@ -256,21 +259,21 @@ function DrawingRoomContent(props: PageProps) {
 
   if (!room) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 p-4 text-center">
-        <h2 className="text-xl font-bold text-slate-800">Drawing Room Not Found</h2>
-        <p className="mt-1 text-xs text-slate-500">The room you are trying to access does not exist or was deleted.</p>
+      <div className="flex min-h-screen flex-col items-center justify-center bg-dotted-grid p-4 text-center">
+        <h2 className="text-xl font-bold text-[#171717]">Whiteboard Not Found</h2>
+        <p className="mt-1 text-xs text-[#77736d]">The board you are trying to access does not exist or was deleted.</p>
         <Link
-          href="/"
-          className="mt-4 rounded-xl bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700"
+          href="/dashboard"
+          className="mt-4 rounded-xl bg-[#171717] px-5 py-2.5 text-xs font-semibold text-[#fffefb] hover:bg-[#2b2b2b]"
         >
-          Return to Dashboard
+          Return to Workspace
         </Link>
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-slate-100">
+    <div className="flex h-screen flex-col overflow-hidden bg-[#fffefb]">
       <Navbar
         session={session}
         owner={owner}

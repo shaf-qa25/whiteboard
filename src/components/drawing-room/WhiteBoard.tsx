@@ -886,12 +886,11 @@ export default function WhiteBoard({
         }
       }}
     >
-      {/* Grid Pattern Background */}
+      {/* Paper Dotted Grid Pattern Background */}
       <div
-        className="pointer-events-none absolute inset-0 opacity-40"
+        className="pointer-events-none absolute inset-0 bg-[#fffefb]"
         style={{
-          backgroundImage:
-            "radial-gradient(#94a3b8 1px, transparent 1px), radial-gradient(#94a3b8 1px, #f8fafc 1px)",
+          backgroundImage: `radial-gradient(#e6e3dc ${Math.max(1, 1.2 * Math.min(zoom, 1.5))}px, transparent ${Math.max(1, 1.2 * Math.min(zoom, 1.5))}px)`,
           backgroundSize: `${24 * zoom}px ${24 * zoom}px`,
           backgroundPosition: `${pan.x}px ${pan.y}px`,
         }}
@@ -920,7 +919,7 @@ export default function WhiteBoard({
             }}
           >
             <svg
-              className="h-5 w-5 drop-shadow-md"
+              className="h-5 w-5 drop-shadow-sm"
               viewBox="0 0 24 24"
               fill={peer.userColor}
               stroke="#ffffff"
@@ -930,7 +929,7 @@ export default function WhiteBoard({
             </svg>
 
             <div
-              className="ml-4 -mt-2 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold text-white shadow-md ring-1 ring-white/30 whitespace-nowrap"
+              className="ml-4 -mt-2 inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold text-white shadow-xs whitespace-nowrap"
               style={{ backgroundColor: peer.userColor }}
             >
               {peer.userName}
@@ -942,7 +941,7 @@ export default function WhiteBoard({
       {/* Inline Text Box for Text Tool */}
       {textInput.visible && (
         <div
-          className="absolute z-50 rounded-xl bg-white p-2 shadow-2xl border border-slate-300 ring-2 ring-blue-500/30"
+          className="absolute z-50 rounded-xl bg-white p-2.5 shadow-paper-modal border border-[#e8e5df]"
           style={{
             left: `${textInput.x}px`,
             top: `${textInput.y}px`,
@@ -962,22 +961,22 @@ export default function WhiteBoard({
               }
             }}
             placeholder="Type note (Enter to place)..."
-            className="w-48 resize-none rounded-lg border border-slate-200 p-2 text-xs text-slate-900 focus:outline-hidden"
+            className="w-52 resize-none rounded-lg border border-[#e8e5df] bg-[#faf8f3] p-2 text-xs text-[#171717] focus:bg-white focus:border-[#171717] focus:outline-hidden transition-colors"
           />
-          <div className="mt-1 flex items-center justify-end gap-1">
+          <div className="mt-1.5 flex items-center justify-end gap-1.5">
             <button
               type="button"
               onClick={() => setTextInput((prev) => ({ ...prev, visible: false, value: "" }))}
-              className="rounded-md px-2 py-1 text-[10px] text-slate-500 hover:bg-slate-100"
+              className="rounded-md px-2 py-1 text-[10px] text-[#77736d] hover:bg-[#faf8f3]"
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={handleCommitText}
-              className="rounded-md bg-blue-600 px-2 py-1 text-[10px] font-bold text-white hover:bg-blue-700"
+              className="rounded-md bg-[#171717] px-2.5 py-1 text-[10px] font-semibold text-[#fffefb] hover:bg-[#2b2b2b]"
             >
-              Add Note
+              Place Note
             </button>
           </div>
         </div>
@@ -1001,29 +1000,29 @@ export default function WhiteBoard({
         />
       </div>
 
-      {/* Real-time Connection & Sync Status Indicator (Step 9) */}
-      <div className="pointer-events-none absolute bottom-4 left-4 z-30 hidden sm:flex items-center gap-2 rounded-lg bg-white/90 px-3 py-1.5 text-[11px] font-medium text-slate-700 backdrop-blur-xs border border-slate-200 shadow-md">
+      {/* Real-time Connection & Sync Status Indicator */}
+      <div className="pointer-events-none absolute bottom-4 left-4 z-30 hidden sm:flex items-center gap-2 rounded-xl bg-white/95 px-3 py-1.5 text-[11px] font-medium text-[#77736d] backdrop-blur-xs border border-[#e8e5df] shadow-paper">
         {syncStatus === "connected" ? (
           <>
             <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#10b981] opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-[#10b981]" />
             </span>
-            <span className="font-semibold text-emerald-800">Live Collaboration Synced</span>
+            <span className="font-semibold text-[#1e6b36]">Live Collaboration Synced</span>
           </>
         ) : syncStatus === "connecting" ? (
           <>
-            <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
-            <span className="text-amber-800">Reconnecting to room...</span>
+            <span className="h-2 w-2 rounded-full bg-[#d97706] animate-pulse" />
+            <span className="text-[#8a6b08]">Reconnecting to studio...</span>
           </>
         ) : (
           <>
-            <span className="h-2 w-2 rounded-full bg-rose-500" />
-            <span className="text-rose-700 font-semibold">Offline Mode (Local Sync)</span>
+            <span className="h-2 w-2 rounded-full bg-[#d95b35]" />
+            <span className="text-[#9c3e1e] font-semibold">Offline Mode (Local Sync)</span>
           </>
         )}
-        <span className="text-slate-300">•</span>
-        <span>{Math.round(zoom * 100)}%</span>
+        <span className="text-[#e8e5df]">•</span>
+        <span className="font-mono text-[#171717]">{Math.round(zoom * 100)}%</span>
       </div>
     </div>
   );

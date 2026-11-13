@@ -182,9 +182,9 @@ export default function VideoWrapper({
 
   if (loading) {
     return (
-      <div className="flex h-40 w-full flex-col items-center justify-center rounded-xl bg-slate-900/60 p-4 text-slate-300">
-        <Spinner className="h-6 w-6 text-blue-400 mb-2" />
-        <span className="text-xs font-medium">Initializing video call...</span>
+      <div className="flex h-40 w-full flex-col items-center justify-center rounded-2xl bg-[#faf8f3] border border-[#e8e5df] p-4 text-[#77736d]">
+        <Spinner className="h-5 w-5 text-[#d95b35] mb-2" />
+        <span className="text-xs font-semibold text-[#171717]">Connecting to video call...</span>
       </div>
     );
   }
@@ -201,22 +201,22 @@ export default function VideoWrapper({
 
   // Graceful Fallback / Demo Mode UI when Stream keys are not yet configured in .env
   const userName = userData?.user_metadata?.userName || "You";
-  const userColor = userData?.user_metadata?.userColor || "#3b82f6";
+  const userColor = userData?.user_metadata?.userColor || "#d95b35";
 
   return (
-    <div className="flex flex-col gap-3 w-full rounded-2xl bg-slate-900/90 p-3.5 border border-slate-700/60 text-white shadow-xl backdrop-blur-md">
+    <div className="flex flex-col gap-3 w-full rounded-2xl bg-white p-3.5 border border-[#e8e5df] text-[#171717] shadow-paper">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
-          <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span>Video Call (Room Mode)</span>
+        <div className="flex items-center gap-1.5 text-xs font-semibold text-[#171717]">
+          <span className="h-2 w-2 rounded-full bg-[#10b981] animate-pulse" />
+          <span>Local Video Preview</span>
         </div>
-        <span className="text-[10px] font-medium text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
-          Direct Mode
+        <span className="text-[10px] font-medium text-[#d95b35] bg-[#fdf0e7] px-2 py-0.5 rounded-full border border-[#fbd7c3]">
+          Camera Test
         </span>
       </div>
 
       {/* Video Tile */}
-      <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-slate-800 border border-slate-700/60 flex items-center justify-center">
+      <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-[#171717] border border-[#e8e5df] flex items-center justify-center">
         {fallbackCamActive ? (
           <video
             ref={videoRef}
@@ -233,15 +233,15 @@ export default function VideoWrapper({
             >
               {userName.charAt(0).toUpperCase()}
             </div>
-            <span className="text-xs font-semibold text-slate-200">{userName}</span>
-            <span className="text-[10px] text-slate-400">Camera is paused</span>
+            <span className="text-xs font-semibold text-white">{userName}</span>
+            <span className="text-[10px] text-slate-400">Camera preview off</span>
           </div>
         )}
 
-        <div className="absolute bottom-2 left-2 z-10 rounded-md bg-slate-900/80 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-xs flex items-center gap-1">
+        <div className="absolute bottom-2 left-2 z-10 rounded-md bg-[#171717]/85 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-xs flex items-center gap-1 border border-white/10">
           <span>{userName} (You)</span>
           {fallbackMicActive && (
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="h-1.5 w-1.5 rounded-full bg-[#10b981] animate-pulse" />
           )}
         </div>
       </div>
@@ -253,8 +253,8 @@ export default function VideoWrapper({
           onClick={toggleFallbackMic}
           className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors cursor-pointer ${
             !fallbackMicActive
-              ? "bg-rose-600 text-white hover:bg-rose-700"
-              : "bg-emerald-600 text-white hover:bg-emerald-700"
+              ? "bg-[#fdf0e7] text-[#d95b35] border border-[#fbd7c3]"
+              : "bg-white text-[#171717] border border-[#e8e5df]"
           }`}
           title={fallbackMicActive ? "Mute microphone" : "Unmute microphone"}
         >
@@ -266,8 +266,8 @@ export default function VideoWrapper({
           onClick={toggleFallbackCamera}
           className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors cursor-pointer ${
             !fallbackCamActive
-              ? "bg-slate-700 text-slate-200 hover:bg-slate-600"
-              : "bg-blue-600 text-white hover:bg-blue-700"
+              ? "bg-white text-[#77736d] border border-[#e8e5df] hover:text-[#171717]"
+              : "bg-[#171717] text-[#fffefb]"
           }`}
           title={fallbackCamActive ? "Turn camera off" : "Turn camera on"}
         >
@@ -275,10 +275,10 @@ export default function VideoWrapper({
         </button>
       </div>
 
-      <div className="flex items-start gap-1.5 rounded-lg bg-slate-800/60 p-2 text-[10px] text-slate-400 border border-slate-700/40">
-        <Info className="h-3.5 w-3.5 text-blue-400 shrink-0 mt-0.5" />
+      <div className="flex items-start gap-1.5 rounded-lg bg-[#faf8f3] p-2 text-[10px] text-[#77736d] border border-[#e8e5df]">
+        <Info className="h-3.5 w-3.5 text-[#d95b35] shrink-0 mt-0.5" />
         <span>
-          Stream Video SDK ready. Add <code className="text-slate-200 font-mono">STREAM_CHAT_API_KEY</code> in .env to activate multi-peer WebRTC calls.
+          Local hardware preview active. Full WebRTC live video syncs automatically when Stream credentials are connected.
         </span>
       </div>
     </div>
