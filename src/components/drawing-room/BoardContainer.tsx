@@ -73,7 +73,7 @@ export default function BoardContainer({
       {isVideoPanelOpen && (
         <aside className="relative z-30 w-80 shrink-0 border-l border-slate-200 bg-slate-900/95 p-4 backdrop-blur-md shadow-2xl flex flex-col justify-between overflow-y-auto transition-all">
           <div className="w-full">
-            <VideoWrapper userData={session?.user || null} callId={room.id}>
+            <VideoWrapper userData={session?.user || null} callId={room.id} accessTicket={accessTicket}>
               <VideoLayout setParticipantCount={setParticipantCount} />
             </VideoWrapper>
           </div>

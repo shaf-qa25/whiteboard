@@ -16,31 +16,24 @@ export async function hashRoomPassword(password: string): Promise<string> {
 }
 
 /**
- * Verifies room password safely on the server.
- * Handles bcrypt hashes and gracefully supports legacy plaintext rooms without breaking them.
+ * Verifies room password safely on the server using bcrypt.
+ * Enforces bcrypt-only hashed passwords. Legacy plaintext passwords are strictly rejected.
  */
 export async function verifyRoomPassword(
   inputPassword: string,
-  storedHashOrPlain: string | null | undefined
+  storedHash: string | null | undefined
 ): Promise<boolean> {
-  if (!storedHashOrPlain) return false;
+  if (!storedHash) return false;
 
-  // Check if stored value is a bcrypt hash ($2a$, $2b$, or $2y$)
-  const isBcrypt = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(storedHashOrPlain);
+  // Check if stored value is a valid bcrypt hash ($2a$, $2b$, or $2y$)
+  const isBcrypt = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(storedHash);
 
-  if (isBcrypt) {
-    return bcrypt.compare(inputPassword, storedHashOrPlain);
-  }
-
-  // Legacy plaintext fallback (using constant-time string comparison)
-  const inputBuffer = Buffer.from(inputPassword);
-  const storedBuffer = Buffer.from(storedHashOrPlain);
-
-  if (inputBuffer.length !== storedBuffer.length) {
+  if (!isBcrypt) {
+    // Legacy plaintext passwords are strictly rejected for production security
     return false;
   }
 
-  return crypto.timingSafeEqual(inputBuffer, storedBuffer);
+  return bcrypt.compare(inputPassword, storedHash);
 }
 
 /**

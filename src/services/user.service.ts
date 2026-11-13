@@ -158,13 +158,17 @@ export const registerUserInRegistry = (userId: string, userName: string, userCol
   }
 };
 
-// Generate Stream video token via backend route
-export const generateUserVideoToken = async (userId: string, roomId?: string) => {
+// Generate Stream video token via backend route with room authorization & access ticket
+export const generateUserVideoToken = async (
+  userId: string,
+  roomId?: string,
+  accessTicket?: string | null
+) => {
   try {
     const res = await fetch("/api/generate-user-video-instance", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, roomId }),
+      body: JSON.stringify({ userId, roomId, accessTicket }),
     });
 
     if (!res.ok) {

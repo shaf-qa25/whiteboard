@@ -22,12 +22,14 @@ interface VideoWrapperProps {
     };
   } | null;
   callId: string;
+  accessTicket?: string | null;
 }
 
 export default function VideoWrapper({
   children,
   userData,
   callId,
+  accessTicket,
 }: VideoWrapperProps) {
   const [client, setClient] = useState<StreamVideoClient | null>(null);
   const [call, setCall] = useState<unknown | null>(null);
@@ -75,7 +77,7 @@ export default function VideoWrapper({
       }
 
       try {
-        const { token, isConfigured } = await generateUserVideoToken(userData.id, callId);
+        const { token, isConfigured } = await generateUserVideoToken(userData.id, callId, accessTicket);
 
         if (!isConfigured || !token) {
           if (!isCancelled) {
@@ -145,7 +147,7 @@ export default function VideoWrapper({
         }
       }
     };
-  }, [userData?.id, userData?.user_metadata?.userName, callId, apiKey]);
+  }, [userData?.id, userData?.user_metadata?.userName, callId, apiKey, accessTicket]);
 
   // Handle local camera preview in fallback mode
   const toggleFallbackCamera = async () => {

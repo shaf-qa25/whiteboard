@@ -3,8 +3,10 @@ import crypto from "crypto";
 import { StreamChat } from "stream-chat";
 import { getSupabaseServerAdmin } from "@/lib/supabaseServerAdmin";
 import { supabase, isSupabaseConfigured } from "@/lib/initSupabase";
+import { verifyRoomAccessTicket } from "@/lib/passwordSecurity";
 
 const DRAWING_ROOM_TABLE = "drawing-rooms";
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Rate limiting map: ip -> { count: number, resetAt: number }
 const tokenRateLimit = new Map<string, { count: number; resetAt: number }>();
@@ -62,7 +64,8 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => ({}));
-    const { userId, roomId } = body;
+    const { userId, roomId, callId, accessTicket } = body;
+    const targetRoomId = (roomId || callId || "").trim();
 
     if (!userId || typeof userId !== "string" || userId.trim().length < 2) {
       return NextResponse.json({ message: "Valid user ID is required" }, { status: 400 });
@@ -73,18 +76,72 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: "User ID contains invalid characters" }, { status: 400 });
     }
 
-    // Optional room membership check
-    if (roomId && typeof roomId === "string") {
-      const dbClient = getSupabaseServerAdmin() || (isSupabaseConfigured ? supabase : null);
-      if (dbClient) {
-        const { data: room, error } = await dbClient
-          .from(DRAWING_ROOM_TABLE)
-          .select("id, isPublic")
-          .eq("id", roomId)
-          .single();
+    // Room ID is strictly required to join a video session
+    if (!targetRoomId) {
+      return NextResponse.json(
+        { message: "Associated room ID is required to generate video call token" },
+        { status: 400 }
+      );
+    }
 
-        if (error || !room) {
-          return NextResponse.json({ message: "Associated room not found" }, { status: 404 });
+    if (!UUID_REGEX.test(targetRoomId)) {
+      return NextResponse.json({ message: "Invalid room ID format" }, { status: 400 });
+    }
+
+    // Room membership & authorization validation
+    const dbClient = getSupabaseServerAdmin() || (isSupabaseConfigured ? supabase : null);
+    if (!dbClient) {
+      return NextResponse.json({ message: "Database service unavailable" }, { status: 503 });
+    }
+
+    const { data: room, error } = await dbClient
+      .from(DRAWING_ROOM_TABLE)
+      .select("id, isPublic, isPasswordProtected, owner")
+      .eq("id", targetRoomId)
+      .single();
+
+    if (error || !room) {
+      return NextResponse.json({ message: "Associated room not found" }, { status: 404 });
+    }
+
+    const isOwner = room.owner === cleanUserId;
+
+    // Private Room Check: non-owner must present valid signed access ticket
+    if (!room.isPublic && !isOwner) {
+      const isAuthorized = accessTicket && verifyRoomAccessTicket(accessTicket, targetRoomId);
+      if (!isAuthorized) {
+        return NextResponse.json(
+          { message: "Access restricted: you do not have permission to join video call in this private room" },
+          { status: 403 }
+        );
+      }
+    }
+
+    // Password-Protected Room Check: non-owner must present validated access ticket
+    if (room.isPasswordProtected && !isOwner) {
+      const isAuthorized = accessTicket && verifyRoomAccessTicket(accessTicket, targetRoomId);
+      if (!isAuthorized) {
+        return NextResponse.json(
+          { message: "Password verification required: unlock room to access video calling" },
+          { status: 403 }
+        );
+      }
+    }
+
+    // Authenticated user session validation if a registered UUID is supplied
+    if (UUID_REGEX.test(cleanUserId)) {
+      const authHeader = req.headers.get("authorization");
+      const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.substring(7) : null;
+      if (bearerToken) {
+        const adminClient = getSupabaseServerAdmin();
+        if (adminClient) {
+          const { data: authData, error: authErr } = await adminClient.auth.getUser(bearerToken);
+          if (authErr || !authData?.user || authData.user.id !== cleanUserId) {
+            return NextResponse.json(
+              { message: "Session mismatch: authenticated user ID does not match token request" },
+              { status: 401 }
+            );
+          }
         }
       }
     }
