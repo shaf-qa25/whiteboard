@@ -17,8 +17,16 @@ export async function POST(req: NextRequest) {
     if (name.trim().length > 100) {
       return NextResponse.json({ message: "Room title must be 100 characters or less" }, { status: 400 });
     }
-    if (!userId || typeof userId !== "string") {
-      return NextResponse.json({ message: "Valid user ID is required" }, { status: 400 });
+    if (!userId || typeof userId !== "string" || userId.trim().toLowerCase() === "system") {
+      return NextResponse.json({ message: "Invalid user ID" }, { status: 400 });
+    }
+
+    const cleanUserId = userId.trim();
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const GUEST_REGEX = /^guest_[a-zA-Z0-9_-]{2,50}$/;
+
+    if (!UUID_REGEX.test(cleanUserId) && !GUEST_REGEX.test(cleanUserId)) {
+      return NextResponse.json({ message: "User ID format is invalid" }, { status: 400 });
     }
 
     let hashedPassword: string | null = null;
@@ -46,7 +54,7 @@ export async function POST(req: NextRequest) {
     const insertPayload = {
       id: roomId,
       name: name.trim(),
-      owner: userId,
+      owner: cleanUserId,
       isPublic: Boolean(isPublic),
       isPasswordProtected,
       password: hashedPassword,

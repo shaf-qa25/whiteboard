@@ -31,9 +31,9 @@ BEGIN
   END LOOP;
 END $$;
 
--- 3. Drop any existing view to prevent security_definer RLS bypass
-DROP VIEW IF EXISTS public.rooms_safe CASCADE;
-DROP VIEW IF EXISTS public.drawing_rooms_safe CASCADE;
+-- 3. Safely drop legacy views without CASCADE to prevent unintended object deletion
+DROP VIEW IF EXISTS public.rooms_safe;
+DROP VIEW IF EXISTS public.drawing_rooms_safe;
 
 -- 4. SELECT: Anyone (anon, guests, users) can read PUBLIC rooms
 CREATE POLICY "Allow read public rooms" ON public."drawing-rooms"

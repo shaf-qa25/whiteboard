@@ -36,7 +36,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ message: "Room not found" }, { status: 404 });
     }
 
-    const isOwner = Boolean(userId && (data.owner === userId || data.owner === "system"));
+    const isOwner = Boolean(userId && data.owner === userId);
     const hasValidTicket = Boolean(accessTicket && verifyRoomAccessTicket(accessTicket, roomId));
 
     // Case 1: Private Room
@@ -109,7 +109,14 @@ export async function DELETE(req: NextRequest, context: RouteContext) {
     }
 
     // 2. Strict ownership check
-    if (room.owner !== userId && room.owner !== "system") {
+    if (room.owner === "system") {
+      return NextResponse.json(
+        { message: "Forbidden. Default system rooms cannot be deleted." },
+        { status: 403 }
+      );
+    }
+
+    if (room.owner !== userId) {
       return NextResponse.json(
         { message: "Forbidden. You cannot delete a room you do not own." },
         { status: 403 }

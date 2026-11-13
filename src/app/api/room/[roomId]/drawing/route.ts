@@ -39,7 +39,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       return NextResponse.json({ message: "Room not found" }, { status: 404 });
     }
 
-    const isOwner = Boolean(userId && (room.owner === userId || room.owner === "system"));
+    const isOwner = Boolean(userId && room.owner === userId);
     const hasValidTicket = Boolean(accessTicket && verifyRoomAccessTicket(accessTicket, roomId));
 
     // If private or password protected, require ownership or valid access ticket
