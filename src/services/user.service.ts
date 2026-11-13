@@ -1,4 +1,4 @@
-import { adminAuthClient, isSupabaseConfigured, supabase } from "../lib/initSupabase";
+import { isSupabaseConfigured, supabase } from "../lib/initSupabase";
 
 export interface AppUserSession {
   user: {
@@ -91,16 +91,19 @@ export const signOutUser = async (): Promise<void> => {
   }
 };
 
-// Fetch user profile by ID
+// Fetch user profile by ID (calls server profile route)
 export const fetchUserById = async (userId: string) => {
-  if (isSupabaseConfigured && adminAuthClient) {
+  if (typeof window !== "undefined") {
     try {
-      const { data, error } = await adminAuthClient.getUserById(userId);
-      if (!error && data?.user) {
-        return { user: data.user };
+      const res = await fetch(`/api/user/profile?userId=${encodeURIComponent(userId)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.user) {
+          return { user: data.user };
+        }
       }
     } catch {
-      // ignore
+      // fallback to client-side cache
     }
   }
 

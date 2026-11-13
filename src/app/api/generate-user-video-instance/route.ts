@@ -24,9 +24,7 @@ export async function POST(req: NextRequest) {
     const apiKey =
       process.env.STREAM_CHAT_API_KEY ||
       process.env.NEXT_PUBLIC_STREAM_CHAT_API_KEY;
-    const secretKey =
-      process.env.STREAM_CHAT_SECRET_KEY ||
-      process.env.NEXT_PUBLIC_STREAM_CHAT_SECRET_KEY;
+    const secretKey = process.env.STREAM_CHAT_SECRET_KEY;
 
     const hasKeys =
       apiKey &&

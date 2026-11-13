@@ -4,7 +4,6 @@ const rawUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 // Normalize URL (strip trailing /rest/v1 or slashes if user pasted full REST endpoint)
 const supabaseUrl = rawUrl.replace(/\/rest\/v1\/?$/, "").replace(/\/+$/, "");
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_API_KEY || "";
-const serviceRoleKey = process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_SECRET || "";
 
 export const isSupabaseConfigured = Boolean(
   supabaseUrl &&
@@ -17,6 +16,7 @@ export const isSupabaseConfigured = Boolean(
 const dummyUrl = "https://placeholder-project.supabase.co";
 const dummyKey = "placeholder-anon-key";
 
+// Client-safe Supabase instance (uses only public anon key)
 export const supabase: SupabaseClient = createClient(
   isSupabaseConfigured ? supabaseUrl : dummyUrl,
   isSupabaseConfigured ? supabaseAnonKey : dummyKey,
@@ -27,16 +27,3 @@ export const supabase: SupabaseClient = createClient(
     },
   }
 );
-
-// Admin client (only initialized when service role key is present)
-export const supabaseWithAdminRole: SupabaseClient | null =
-  isSupabaseConfigured && serviceRoleKey
-    ? createClient(supabaseUrl, serviceRoleKey, {
-        auth: {
-          autoRefreshToken: false,
-          persistSession: false,
-        },
-      })
-    : null;
-
-export const adminAuthClient = supabaseWithAdminRole?.auth?.admin ?? null;
